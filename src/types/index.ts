@@ -64,7 +64,7 @@ export interface FoodItem {
   energyRestore?: number;
 }
 
-export type MiniGameId = 'gem-crush' | 'bath-time' | 'bubble-pop' | 'nub-catch' | 'obstacle-dash' | 'nubkin-jump' | 'nubkin-launch';
+export type MiniGameId = 'twist-catch' | 'bath-time' | 'bubble-pop' | 'nub-catch' | 'obstacle-dash' | 'nubkin-jump' | 'nubkin-launch';
 
 export interface MiniGameDef {
   id: MiniGameId;

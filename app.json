@@ -1,7 +1,8 @@
 {
   "expo": {
-    "name": "Game4-Nubkins",
+    "name": "Nubkins",
     "slug": "Game4-Nubkins",
+    "scheme": "nubkins",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon/icon.png",
@@ -19,15 +20,16 @@
         "react-native-google-mobile-ads",
         {
           "androidAppId": "ca-app-pub-3981993675235210~9586961963",
-          "iosAppId": "ca-app-pub-REPLACE-WITH-IOS-APP-ID"
+          "iosAppId": "ca-app-pub-3981993675235210~8568808006"
         }
       ]
     ],
     "ios": {
-      "supportsTablet": true,
+      "supportsTablet": false,
       "bundleIdentifier": "com.amuletstudios.nubkins",
       "infoPlist": {
-        "NSUserTrackingUsageDescription": "This identifier will be used to deliver personalized ads to you."
+        "NSUserTrackingUsageDescription": "This identifier will be used to deliver personalized ads to you.",
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {

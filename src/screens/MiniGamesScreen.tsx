@@ -23,7 +23,7 @@ import { useTooltip } from '../hooks/useTooltip';
 import { FONT } from '../lib/theme';
 import { getThemeById } from '../data/themes';
 import { useAds, AD_PLAY_REWARD } from '../hooks/useAds';
-import GemCrush      from './games/GemCrush';
+import TwistCatch    from './games/TwistCatch';
 import BathTime      from './games/BathTime';
 import NubkinJump    from './games/NubkinJump';
 
@@ -32,24 +32,24 @@ const FEAT_W = (SCREEN_W - 48) / 2;
 
 type ActiveGame = MiniGameId | null;
 
-const MAIN_IDS: MiniGameId[] = ['gem-crush', 'bath-time', 'nubkin-jump'];
+const MAIN_IDS: MiniGameId[] = ['twist-catch', 'bath-time', 'nubkin-jump'];
 
 const FEAT_ACCENT: Record<string, string> = {
-  'gem-crush':   '#9B59B6',
+  'twist-catch': '#9B59B6',
   'bath-time':   '#2980B9',
   'nubkin-jump': '#E74C3C',
 };
 
 const GAME_IMG: Record<string, ReturnType<typeof require>> = {
-  'gem-crush':   require('../../assets/dooyoo/Dooyoo-happy.png'),
+  'twist-catch': require('../../assets/dooyoo/Dooyoo-happy.png'),
   'bath-time':   require('../../assets/minigame_items/foam-left.png'),
   'nubkin-jump': require('../../assets/minigame_items/stump.png'),
 };
 
 // Achievement reward previews — standalone graphics shown on the game card
 const ACHIEVEMENT_REWARD: Record<string, ReturnType<typeof require>> = {
-  'gem-crush': require('../../assets/custom-items/Amu.png'),
-  'bath-time': require('../../assets/custom-items/EarthBall.png'),
+  'twist-catch': require('../../assets/custom-items/Amu.png'),
+  'bath-time':   require('../../assets/custom-items/EarthBall.png'),
 };
 
 function badgeColor(left: number, max: number) {
@@ -98,7 +98,7 @@ export default function MiniGamesScreen() {
     const safeScore = Math.max(0, score);
     let coins: number;
     let xp: number;
-    if (gameId === 'gem-crush') {
+    if (gameId === 'twist-catch') {
       coins = Math.min(500, Math.floor(safeScore / 5));
       xp    = Math.min(500, Math.floor(safeScore / 5));
     } else if (gameId === 'obstacle-dash') {
@@ -148,7 +148,7 @@ export default function MiniGamesScreen() {
           <TouchableOpacity style={[styles.backBtn, { top: insets.top + 60 }]} onPress={exitGame}>
             <Text style={styles.backBtnText}>X Quit</Text>
           </TouchableOpacity>
-          {activeGame === 'gem-crush'   && <GemCrush   level={creature.level} onFinish={s => handleGameFinish('gem-crush',   s)} />}
+          {activeGame === 'twist-catch' && <TwistCatch level={creature.level} onFinish={s => handleGameFinish('twist-catch', s)} />}
           {activeGame === 'bath-time'   && <BathTime   level={creature.level} onFinish={s => handleGameFinish('bath-time',   s)} />}
           {activeGame === 'nubkin-jump' && <NubkinJump level={creature.level} onFinish={s => handleGameFinish('nubkin-jump', s)} />}
         </View>

@@ -2,9 +2,9 @@ import { MiniGameDef } from '../types';
 
 export const MINI_GAMES: MiniGameDef[] = [
   {
-    id: 'gem-crush',
-    name: 'Gem Crush',
-    description: 'Swap adjacent gems to match 3 or more. Combos multiply your score!',
+    id: 'twist-catch',
+    name: 'Twist Catch',
+    description: 'Tap the center hub to rotate it and line up 4+ matching Nubkins across the arms!',
     emoji: '',
     baseCoinsPerPlay: 40,
     baseXpPerPlay: 30,

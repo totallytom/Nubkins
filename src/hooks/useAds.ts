@@ -1,3 +1,4 @@
+import { Platform } from 'react-native';
 import Constants from 'expo-constants';
 import Purchases from 'react-native-purchases';
 import { useGameStore } from '../store/useGameStore';
@@ -6,8 +7,14 @@ export const AD_PLAY_REWARD = 3;
 export const REMOVE_ADS_PRODUCT_ID = 'remove_ads_permanent';
 export const REMOVE_ADS_ENTITLEMENT = 'remove_ads';
 
-const REWARDED_AD_UNIT_ID     = 'ca-app-pub-3981993675235210/5459025017';
-const INTERSTITIAL_AD_UNIT_ID = 'ca-app-pub-3981993675235210/1466020679';
+const REWARDED_AD_UNIT_ID = Platform.select({
+  ios:     'ca-app-pub-3981993675235210/762741695',
+  android: 'ca-app-pub-3981993675235210/5459025017',
+})!;
+const INTERSTITIAL_AD_UNIT_ID = Platform.select({
+  ios:     'ca-app-pub-3981993675235210/7648080756',
+  android: 'ca-app-pub-3981993675235210/1466020679',
+})!;
 
 const IS_EXPO_GO = Constants.executionEnvironment === 'storeClient';
 
