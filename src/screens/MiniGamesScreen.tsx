@@ -13,17 +13,20 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
-import { useGameStore, ENERGY_RECHARGE_MINUTES } from '../store/useGameStore';
+import { useGameStore, ENERGY_RECHARGE_MINUTES, traitLovesGame } from '../store/useGameStore';
+import { getTrait } from '../data/personality';
 import { MINI_GAMES } from '../data/minigames';
 import { MiniGameId } from '../types';
 import CoinDisplay from '../components/CoinDisplay';
 import TooltipCard from '../components/TooltipCard';
 import { useTooltip } from '../hooks/useTooltip';
-import { FONT } from '../lib/theme';
+import { FONT, KAWAII, KAWAII_BTN } from '../lib/theme';
 import { getThemeById } from '../data/themes';
 import { useAds, AD_PLAY_REWARD } from '../hooks/useAds';
 import TwistCatch    from './games/TwistCatch';
+import SlideCatch    from './games/SlideCatch';
 import BathTime      from './games/BathTime';
 import NubkinJump    from './games/NubkinJump';
 
@@ -32,16 +35,18 @@ const FEAT_W = (SCREEN_W - 48) / 2;
 
 type ActiveGame = MiniGameId | null;
 
-const MAIN_IDS: MiniGameId[] = ['twist-catch', 'bath-time', 'nubkin-jump'];
+const MAIN_IDS: MiniGameId[] = ['twist-catch', 'slide-catch', 'bath-time', 'nubkin-jump'];
 
 const FEAT_ACCENT: Record<string, string> = {
   'twist-catch': '#9B59B6',
+  'slide-catch': '#E67E22',
   'bath-time':   '#2980B9',
   'nubkin-jump': '#E74C3C',
 };
 
 const GAME_IMG: Record<string, ReturnType<typeof require>> = {
   'twist-catch': require('../../assets/dooyoo/Dooyoo-happy.png'),
+  'slide-catch': require('../../assets/louie/louie-happy.png'),
   'bath-time':   require('../../assets/minigame_items/foam-left.png'),
   'nubkin-jump': require('../../assets/minigame_items/stump.png'),
 };
@@ -59,6 +64,8 @@ function badgeColor(left: number, max: number) {
 }
 
 export default function MiniGamesScreen() {
+  // The circle tab bar floats over the screen; keep content clear of it.
+  const tabBarHeight = useBottomTabBarHeight();
   const navigation = useNavigation<any>();
   const profile              = useGameStore(s => s.profile);
   const creature              = useGameStore(s => s.creature);
@@ -98,7 +105,7 @@ export default function MiniGamesScreen() {
     const safeScore = Math.max(0, score);
     let coins: number;
     let xp: number;
-    if (gameId === 'twist-catch') {
+    if (gameId === 'twist-catch' || gameId === 'slide-catch') {
       coins = Math.min(500, Math.floor(safeScore / 5));
       xp    = Math.min(500, Math.floor(safeScore / 5));
     } else if (gameId === 'obstacle-dash') {
@@ -140,7 +147,7 @@ export default function MiniGamesScreen() {
       imageStyle={{ opacity: 0.45 }}
     >
       <View style={styles.bgOverlay} />
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { paddingBottom: tabBarHeight }]} edges={['top']}>
 
       {/* Full-screen game modal */}
       <Modal visible={activeGame !== null} animationType="slide" statusBarTranslucent onRequestClose={exitGame}>
@@ -149,6 +156,7 @@ export default function MiniGamesScreen() {
             <Text style={styles.backBtnText}>X Quit</Text>
           </TouchableOpacity>
           {activeGame === 'twist-catch' && <TwistCatch level={creature.level} onFinish={s => handleGameFinish('twist-catch', s)} />}
+          {activeGame === 'slide-catch' && <SlideCatch level={creature.level} onFinish={s => handleGameFinish('slide-catch', s)} />}
           {activeGame === 'bath-time'   && <BathTime   level={creature.level} onFinish={s => handleGameFinish('bath-time',   s)} />}
           {activeGame === 'nubkin-jump' && <NubkinJump level={creature.level} onFinish={s => handleGameFinish('nubkin-jump', s)} />}
         </View>
@@ -165,9 +173,11 @@ export default function MiniGamesScreen() {
               <Text style={styles.rewardItem}>+{resultModal?.xp} XP</Text>
             </View>
             <Text style={styles.resultPet}>
-              {resultModal?.gameId === 'bath-time'
-                ? `${creature.name} is sparkling clean!`
-                : `${creature.name} loved playing!`}
+              {resultModal && traitLovesGame(creature.trait, resultModal.gameId)
+                ? `${creature.name} LOVES this game! ${getTrait(creature.trait)?.emoji ?? ''} Extra happy!`
+                : resultModal?.gameId === 'bath-time'
+                  ? `${creature.name} is sparkling clean!`
+                  : `${creature.name} loved playing!`}
             </Text>
             <TouchableOpacity style={styles.resultBtn} onPress={() => setResultModal(null)}>
               <Text style={styles.resultBtnText}>Sweet!</Text>
@@ -408,13 +418,13 @@ const styles = StyleSheet.create({
   backBtnText: { fontFamily: FONT, color: '#FFF', fontWeight: '700', fontSize: 14 },
 
   // Result modal
-  resultBackdrop: { flex: 1, backgroundColor: 'rgba(0,0,0,0.75)', alignItems: 'center', justifyContent: 'center' },
-  resultCard:     { backgroundColor: '#1A1A35', borderRadius: 24, padding: 28, alignItems: 'center', width: '80%', gap: 12, borderWidth: 1, borderColor: '#3D3D6B' },
-  resultTitle:    { fontFamily: FONT, color: '#EFEFFF', fontSize: 26, fontWeight: '900' },
-  resultScore:    { fontFamily: FONT, color: '#F39C12', fontSize: 20, fontWeight: '800' },
-  rewardRow:      { flexDirection: 'row', gap: 20 },
-  rewardItem:     { fontFamily: FONT, color: '#CCCCEE', fontSize: 16, fontWeight: '700' },
-  resultPet:      { fontFamily: FONT, color: '#9B59B6', fontSize: 14, fontStyle: 'italic' },
-  resultBtn:      { backgroundColor: '#9B59B6', paddingHorizontal: 40, paddingVertical: 14, borderRadius: 18, marginTop: 4 },
-  resultBtnText:  { fontFamily: FONT, color: '#FFF', fontWeight: '800', fontSize: 16 },
+  resultBackdrop: { flex: 1, backgroundColor: KAWAII.backdrop, alignItems: 'center', justifyContent: 'center' },
+  resultCard:     { backgroundColor: KAWAII.card, borderRadius: 36, padding: 28, alignItems: 'center', width: '80%', gap: 12, borderWidth: 5, borderColor: KAWAII.cardBorder },
+  resultTitle:    { fontFamily: FONT, color: KAWAII.ink, fontSize: 26, fontWeight: '900' },
+  resultScore:    { fontFamily: FONT, color: KAWAII.orange, fontSize: 20, fontWeight: '800' },
+  rewardRow:      { flexDirection: 'row', gap: 12 },
+  rewardItem:     { fontFamily: FONT, color: KAWAII.ink, fontSize: 16, fontWeight: '800', backgroundColor: KAWAII.yellow, borderWidth: 2, borderColor: KAWAII.ink, borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6, overflow: 'hidden' },
+  resultPet:      { fontFamily: FONT, color: KAWAII.inkSoft, fontSize: 14, fontStyle: 'italic' },
+  resultBtn:      { ...KAWAII_BTN, backgroundColor: KAWAII.pink, paddingHorizontal: 40, paddingVertical: 14, marginTop: 4 },
+  resultBtnText:  { fontFamily: FONT, color: KAWAII.ink, fontWeight: '900', fontSize: 16 },
 });

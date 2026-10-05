@@ -3,7 +3,7 @@ import {
   Alert, Animated, Dimensions, Image, ImageBackground,
   PanResponder, StyleSheet, Text, TouchableOpacity, View,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import { useAudioPlayer } from 'expo-audio';
 import { FONT } from '../../lib/theme';
 import { getSkinImages } from '../../lib/skinImages';
 import { useGameStore } from '../../store/useGameStore';
@@ -245,20 +245,8 @@ export default function BathTime({ onFinish }: Props) {
   const continuePromptRef   = useRef(false);
   const continuePromptAtRef = useRef(0);
   const continueUsedRef     = useRef(false);   // only one continue allowed per game
-  const bathSoundRef = useRef<Audio.Sound | null>(null);
+  const bathSound = useAudioPlayer(require('../../../assets/audio/bathsound.mp3'));
 
-  useEffect(() => {
-    let cancelled = false;
-    Audio.Sound.createAsync(require('../../../assets/audio/bathsound.mp3')).then(({ sound }) => {
-      if (cancelled) { sound.unloadAsync(); return; }
-      bathSoundRef.current = sound;
-    });
-    return () => {
-      cancelled = true;
-      bathSoundRef.current?.unloadAsync();
-      bathSoundRef.current = null;
-    };
-  }, []);
 
   // ── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -266,7 +254,7 @@ export default function BathTime({ onFinish }: Props) {
     foamOpacity.stopAnimation();
     foamOpacity.setValue(1);
     Animated.timing(foamOpacity, { toValue: 0, duration: 700, useNativeDriver: true }).start();
-    playSfx(bathSoundRef.current);
+    playSfx(bathSound);
   }
 
   function spawnParticle(x: number, y: number, label: string) {

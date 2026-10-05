@@ -9,7 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { FONT } from '../lib/theme';
+import { FONT, KAWAII, KAWAII_BTN } from '../lib/theme';
 import { getSkinImages } from '../lib/skinImages';
 import { useGameStore } from '../store/useGameStore';
 
@@ -32,7 +32,7 @@ function DaySlot({ day, state, glowAnim }: SlotProps) {
 
   const glowStyle = isToday
     ? {
-        shadowColor: '#F39C12',
+        shadowColor: '#FFB300',
         shadowOpacity: glowAnim as unknown as number,
         shadowRadius: 12,
         shadowOffset: { width: 0, height: 0 },
@@ -193,15 +193,15 @@ export default function DailyStreakModal({
 const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.78)',
+    backgroundColor: KAWAII.backdrop,
     alignItems: 'center',
     justifyContent: 'center',
   },
   card: {
-    backgroundColor: '#646469',
-    borderRadius: 70,
+    backgroundColor: KAWAII.card,
+    borderRadius: 44,
     borderWidth: 5,
-    borderColor: '#65d8ec',
+    borderColor: KAWAII.cardBorder,
     padding: 24,
     paddingTop: 12,
     alignItems: 'center',
@@ -217,13 +217,13 @@ const styles = StyleSheet.create({
 
   fireRow: {
     fontFamily: FONT,
-    color: '#F39C12',
+    color: KAWAII.orange,
     fontSize: 15,
     fontWeight: '800',
   },
   title: {
     fontFamily: FONT,
-    color: '#EFEFFF',
+    color: KAWAII.ink,
     fontSize: 26,
     fontWeight: '900',
     marginBottom: 4,
@@ -243,35 +243,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
     borderRadius: 12,
     borderWidth: 1.5,
-    borderColor: '#2A2A55',
-    backgroundColor: '#1A1A3A',
+    borderColor: '#FFC2E0',
+    backgroundColor: '#FFFFFF',
   },
   slotDone: {
-    borderColor: '#27AE60',
-    backgroundColor: '#1B3A28',
+    borderColor: '#3CC48A',
+    backgroundColor: '#C8F5E1',
   },
   slotToday: {
-    borderColor: '#F39C12',
-    backgroundColor: '#2A2010',
+    borderColor: '#F5A300',
+    backgroundColor: '#FFE98A',
   },
   slotFuture: {
-    borderColor: '#1E1E40',
-    backgroundColor: '#13132A',
-    opacity: 0.55,
+    borderColor: '#E9DDEE',
+    backgroundColor: '#F6F0F8',
+    opacity: 0.85,
   },
   slotCheck: {
-    color: '#2ECC71',
+    color: '#1F8F5F',
     fontSize: 16,
     fontWeight: '900',
   },
   slotDay: {
     fontFamily: FONT,
-    color: '#F39C12',
+    color: KAWAII.ink,
     fontSize: 13,
     fontWeight: '900',
   },
   slotDayFuture: {
-    color: '#555577',
+    color: '#A08AA6',
   },
   slotRewardRow: {
     flexDirection: 'row',
@@ -280,13 +280,13 @@ const styles = StyleSheet.create({
   },
   slotReward: {
     fontFamily: FONT,
-    color: '#CCCCEE',
+    color: KAWAII.ink,
     fontSize: 8,
     fontWeight: '700',
     textAlign: 'center',
   },
   slotRewardFuture: {
-    color: '#333355',
+    color: '#A08AA6',
   },
   slotCoinImg: {
     width: 9,
@@ -294,7 +294,7 @@ const styles = StyleSheet.create({
   },
   slotTodayLabel: {
     fontFamily: FONT,
-    color: '#F39C12',
+    color: KAWAII.orange,
     fontSize: 7,
     fontWeight: '900',
     letterSpacing: 0.5,
@@ -303,13 +303,14 @@ const styles = StyleSheet.create({
   // ── Rewards ───────────────────────────────────────────────────────────────
   divider: {
     width: '100%',
-    height: 1,
-    backgroundColor: '#2A2A55',
+    height: 2,
+    borderRadius: 1,
+    backgroundColor: '#FFC2E0',
     marginVertical: 2,
   },
   earnedLabel: {
     fontFamily: FONT,
-    color: '#ffffff',
+    color: KAWAII.inkSoft,
     fontSize: 12,
     fontWeight: '700',
     letterSpacing: 1,
@@ -323,20 +324,20 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    backgroundColor: '#2A1F0A',
+    backgroundColor: '#FFF1B8',
     borderRadius: 16,
-    borderWidth: 1.5,
-    borderColor: '#F39C12',
+    borderWidth: 2,
+    borderColor: '#F5A300',
     paddingHorizontal: 16,
     paddingVertical: 10,
   },
   rewardPillDiamond: {
-    backgroundColor: '#1A0F2E',
-    borderColor: '#9B59B6',
+    backgroundColor: '#EADFFF',
+    borderColor: '#9B6BFF',
   },
   rewardAmount: {
     fontFamily: FONT,
-    color: '#F39C12',
+    color: KAWAII.ink,
     fontSize: 22,
     fontWeight: '900',
   },
@@ -346,7 +347,7 @@ const styles = StyleSheet.create({
   },
   bonusNote: {
     fontFamily: FONT,
-    color: '#F39C12',
+    color: KAWAII.orange,
     fontSize: 11,
     fontWeight: '700',
     opacity: 0.85,
@@ -354,23 +355,23 @@ const styles = StyleSheet.create({
 
   // ── Collect button ────────────────────────────────────────────────────────
   collectBtn: {
-    backgroundColor: '#9B59B6',
+    ...KAWAII_BTN,
+    backgroundColor: KAWAII.pink,
     paddingHorizontal: 52,
     paddingVertical: 14,
-    borderRadius: 20,
     marginTop: 4,
     alignSelf: 'stretch',
     alignItems: 'center',
   },
   collectText: {
     fontFamily: FONT,
-    color: '#FFF',
+    color: KAWAII.ink,
     fontWeight: '900',
     fontSize: 18,
   },
   footer: {
     fontFamily: FONT,
-    color: '#444466',
+    color: KAWAII.inkSoft,
     fontSize: 11,
     textAlign: 'center',
   },

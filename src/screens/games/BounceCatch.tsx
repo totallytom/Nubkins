@@ -12,7 +12,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import { Audio } from 'expo-av';
+import { useAudioPlayer } from 'expo-audio';
 import { FONT } from '../../lib/theme';
 import { playSfx } from '../../lib/sfx';
 import PauseOverlay from '../../components/PauseOverlay';
@@ -98,27 +98,8 @@ export default function NubCatch({ level, onFinish }: Props) {
   const saveMeRef       = useRef(false);   // "time's up, save me?" overlay showing
   const continueUsedRef = useRef(false);   // only one continue allowed per game
   const windStreaks = useRef([0, 1, 2].map(() => new Animated.Value(0))).current;
-  const catchSoundRef = useRef<Audio.Sound | null>(null);
-  const missSoundRef  = useRef<Audio.Sound | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    Audio.Sound.createAsync(require('../../../assets/audio/pointup.mp3')).then(({ sound }) => {
-      if (cancelled) { sound.unloadAsync(); return; }
-      catchSoundRef.current = sound;
-    });
-    Audio.Sound.createAsync(require('../../../assets/audio/error.mp3')).then(({ sound }) => {
-      if (cancelled) { sound.unloadAsync(); return; }
-      missSoundRef.current = sound;
-    });
-    return () => {
-      cancelled = true;
-      catchSoundRef.current?.unloadAsync();
-      missSoundRef.current?.unloadAsync();
-      catchSoundRef.current = null;
-      missSoundRef.current  = null;
-    };
-  }, []);
+  const catchSound = useAudioPlayer(require('../../../assets/audio/pointup.mp3'));
+  const missSound  = useAudioPlayer(require('../../../assets/audio/error.mp3'));
 
   useEffect(() => {
     const anims = windStreaks.map((v, i) =>
@@ -258,7 +239,7 @@ export default function NubCatch({ level, onFinish }: Props) {
           if (moved.x + BALL_SIZE >= px && moved.x <= px + PADDLE_W) {
             // Caught by basket
             if (moved.points > 0) {
-              playSfx(catchSoundRef.current);
+              playSfx(catchSound);
               streakRef.current += 1;
               const mult   = streakRef.current >= 5 ? 3 : streakRef.current >= 3 ? 2 : 1;
               const gained = moved.points * mult;
@@ -269,7 +250,7 @@ export default function NubCatch({ level, onFinish }: Props) {
               else if (moved.points >= 50) showFlash('+50!');
             } else {
               // Joopberry
-              playSfx(missSoundRef.current);
+              playSfx(missSound);
               scoreRef.current = Math.max(0, scoreRef.current + moved.points);
               streakRef.current = 0;
               setScore(scoreRef.current);
@@ -284,7 +265,7 @@ export default function NubCatch({ level, onFinish }: Props) {
 
         // ── Zone 2: barrier at the bottom ───────────────────────────────
         if (moved.missed && moved.y + BALL_SIZE >= GAME_H - BARRIER_H) {
-          playSfx(missSoundRef.current);
+          playSfx(missSound);
           streakRef.current = 0;
           setStreak(0);
           showFlash('MISS!');

@@ -11,7 +11,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Audio } from 'expo-av';
+import { useAudioPlayer } from 'expo-audio';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -172,29 +172,9 @@ export default function NubkinLaunch({ level, onFinish }: Props) {
   const continueUsedRef  = useRef(false);
   const finishTimeout    = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  const boingSoundRef = useRef<Audio.Sound | null>(null);
-  const coinSoundRef  = useRef<Audio.Sound | null>(null);
-  const fallSoundRef  = useRef<Audio.Sound | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    Promise.all([
-      Audio.Sound.createAsync(require('../../../assets/audio/jumping.wav')),
-      Audio.Sound.createAsync(require('../../../assets/audio/pointup.mp3')),
-      Audio.Sound.createAsync(require('../../../assets/audio/error.mp3')),
-    ]).then(([boing, coin, fall]) => {
-      if (cancelled) { boing.sound.unloadAsync(); coin.sound.unloadAsync(); fall.sound.unloadAsync(); return; }
-      boingSoundRef.current = boing.sound;
-      coinSoundRef.current  = coin.sound;
-      fallSoundRef.current  = fall.sound;
-    });
-    return () => {
-      cancelled = true;
-      boingSoundRef.current?.unloadAsync();
-      coinSoundRef.current?.unloadAsync();
-      fallSoundRef.current?.unloadAsync();
-    };
-  }, []);
+  const boingSound = useAudioPlayer(require('../../../assets/audio/jumping.wav'));
+  const coinSound  = useAudioPlayer(require('../../../assets/audio/pointup.mp3'));
+  const fallSound  = useAudioPlayer(require('../../../assets/audio/error.mp3'));
 
   useEffect(() => {
     return () => {
@@ -251,7 +231,7 @@ export default function NubkinLaunch({ level, onFinish }: Props) {
   }
 
   function endedFall() {
-    playSfx(fallSoundRef.current);
+    playSfx(fallSound);
     setMood('sad');
     if (!continueUsedRef.current) {
       saveMeRef.current = true;
@@ -311,7 +291,7 @@ export default function NubkinLaunch({ level, onFinish }: Props) {
         scoreRef.current += 25;
         setScore(scoreRef.current);
         setCoinsGot(c => c + 1);
-        playSfx(coinSoundRef.current);
+        playSfx(coinSound);
         continue;
       }
       if (prop.type === 'boost') {
@@ -335,7 +315,7 @@ export default function NubkinLaunch({ level, onFinish }: Props) {
           const bonus = 15 * comboRef.current;
           scoreRef.current += bonus;
           setScore(scoreRef.current);
-          playSfx(boingSoundRef.current);
+          playSfx(boingSound);
           bouncedThisFrame = true;
         } else {
           vel.x = -vel.x * 0.5;

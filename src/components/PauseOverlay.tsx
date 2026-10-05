@@ -1,6 +1,6 @@
 import React from 'react';
 import { StyleSheet, Text, TouchableOpacity, View } from 'react-native';
-import { FONT } from '../lib/theme';
+import { FONT, KAWAII, KAWAII_BTN } from '../lib/theme';
 
 interface Props {
   visible: boolean;
@@ -28,39 +28,39 @@ export default function PauseOverlay({ visible, onResume, onQuit }: Props) {
 const styles = StyleSheet.create({
   backdrop: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    backgroundColor: KAWAII.backdrop,
     alignItems: 'center',
     justifyContent: 'center',
     zIndex: 999,
   },
   card: {
-    backgroundColor: '#1A1A35',
-    borderRadius: 24,
+    backgroundColor: KAWAII.card,
+    borderRadius: 32,
     padding: 32,
     alignItems: 'center',
     gap: 16,
-    borderWidth: 2,
-    borderColor: '#9B59B6',
+    borderWidth: 4,
+    borderColor: KAWAII.cardBorder,
     minWidth: 220,
   },
   title: {
     fontFamily: FONT,
-    color: '#EFEFFF',
+    color: KAWAII.ink,
     fontSize: 28,
     fontWeight: '900',
     marginBottom: 4,
   },
   resumeBtn: {
-    backgroundColor: '#9B59B6',
+    ...KAWAII_BTN,
+    backgroundColor: KAWAII.mint,
     paddingHorizontal: 40,
     paddingVertical: 14,
-    borderRadius: 16,
     alignSelf: 'stretch',
     alignItems: 'center',
   },
   resumeText: {
     fontFamily: FONT,
-    color: '#FFF',
+    color: KAWAII.ink,
     fontWeight: '800',
     fontSize: 17,
   },
@@ -71,7 +71,7 @@ const styles = StyleSheet.create({
   },
   quitText: {
     fontFamily: FONT,
-    color: '#7777AA',
+    color: KAWAII.inkSoft,
     fontWeight: '700',
     fontSize: 14,
   },

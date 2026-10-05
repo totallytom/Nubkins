@@ -13,11 +13,14 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import * as Notifications from 'expo-notifications';
 import { useGameStore } from '../store/useGameStore';
 import { THEMES, CapsuleTheme, getThemeById } from '../data/themes';
 import { MINI_GAMES } from '../data/minigames';
-import { FONT } from '../lib/theme';
+import { FONT, KAWAII, KAWAII_BTN } from '../lib/theme';
+import NamePetModal from '../components/NamePetModal';
+import { useAds, runRestoreWithAlerts } from '../hooks/useAds';
 
 const APP_VERSION = '1.0.0';
 
@@ -264,6 +267,8 @@ function VolumeControl({ value, onChange }: { value: number; onChange: (v: numbe
 
 // ── Main screen ───────────────────────────────────────
 export default function SettingsScreen() {
+  // The circle tab bar floats over the screen; keep content clear of it.
+  const tabBarHeight = useBottomTabBarHeight();
   const themeId           = useGameStore(s => s.themeId);
   const setTheme          = useGameStore(s => s.setTheme);
   const ownedCosmeticIds  = useGameStore(s => s.profile.ownedCosmeticIds);
@@ -277,6 +282,10 @@ export default function SettingsScreen() {
   const refillPlays       = useGameStore(s => s.refillPlays);
   const [themeModalOpen,   setThemeModalOpen]   = useState(false);
   const [tutorialOpen,     setTutorialOpen]     = useState(false);
+  const [renameOpen,       setRenameOpen]       = useState(false);
+  const [restoring,        setRestoring]        = useState(false);
+  const { restorePurchases } = useAds();
+  const creatureName      = useGameStore(s => s.creature.name);
   const [notifStatus, setNotifStatus]       = useState<'granted' | 'denied' | 'undetermined'>('undetermined');
 
   useEffect(() => {
@@ -329,9 +338,19 @@ export default function SettingsScreen() {
       resizeMode="stretch"
     >
       <View style={styles.bgOverlay} />
-    <SafeAreaView style={styles.safe} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { paddingBottom: tabBarHeight }]} edges={['top']}>
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.pageTitle}>Settings</Text>
+
+        {/* Nubkin */}
+        <Section label="NUBKIN">
+          <Row
+            label="Name"
+            value={creatureName}
+            onPress={() => setRenameOpen(true)}
+            last
+          />
+        </Section>
 
         {/* Capsule */}
         <Section label="CAPSULE">
@@ -393,6 +412,19 @@ export default function SettingsScreen() {
           </View>
         </Section>
 
+        {/* Purchases */}
+        <Section label="PURCHASES">
+          <Row
+            label={restoring ? 'Restoring…' : 'Restore Purchases'}
+            onPress={restoring ? undefined : async () => {
+              setRestoring(true);
+              await runRestoreWithAlerts(restorePurchases);
+              setRestoring(false);
+            }}
+            last
+          />
+        </Section>
+
         {/* Help */}
         <Section label="HELP">
           <Row
@@ -431,6 +463,22 @@ export default function SettingsScreen() {
             <Row
               label="Refill All Game Plays"
               onPress={() => MINI_GAMES.forEach(g => refillPlays(g.id))}
+            />
+            <Row
+              label="Gain 500 XP"
+              onPress={() => useGameStore.getState().gainXP(500)}
+            />
+            <Row
+              label="Age Nubkin +7 Days"
+              onPress={() => {
+                // Moves the hatch date back so anniversary parties can be tested;
+                // they trigger next time the Home screen mounts (restart the app).
+                const { creature, save } = useGameStore.getState();
+                const earlier = new Date(new Date(creature.createdAt).getTime() - 7 * 86_400_000).toISOString();
+                useGameStore.setState({ creature: { ...creature, createdAt: earlier } });
+                save();
+                Alert.alert('Aged 7 days', 'Restart the app to trigger any anniversary parties.');
+              }}
               last
             />
           </Section>
@@ -474,6 +522,8 @@ export default function SettingsScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+      <NamePetModal visible={renameOpen} mode="rename" onDone={() => setRenameOpen(false)} />
+
       {/* ── Tutorial / How to Play modal ── */}
       <Modal
         visible={tutorialOpen}
@@ -646,11 +696,14 @@ const styles = StyleSheet.create({
   // ── MODAL ────────────────────────────────────────────
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.65)',
+    backgroundColor: KAWAII.backdrop,
     justifyContent: 'flex-end',
   },
   modalSheet: {
-    backgroundColor: '#13132A',
+    backgroundColor: KAWAII.card,
+    borderWidth: 4,
+    borderBottomWidth: 0,
+    borderColor: KAWAII.cardBorder,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     padding: 20,
@@ -658,15 +711,15 @@ const styles = StyleSheet.create({
   },
   modalHandle: {
     width: 40,
-    height: 4,
-    backgroundColor: '#070707',
-    borderRadius: 2,
+    height: 5,
+    backgroundColor: KAWAII.pink,
+    borderRadius: 3,
     alignSelf: 'center',
     marginBottom: 16,
   },
   modalTitle: {
     fontFamily: FONT,
-    color: '#070707',
+    color: KAWAII.ink,
     fontSize: 20,
     fontWeight: '800',
     marginBottom: 16,
@@ -770,11 +823,14 @@ const styles = StyleSheet.create({
   // ── TUTORIAL MODAL ───────────────────────────────────
   tutBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(0,0,0,0.78)',
+    backgroundColor: KAWAII.backdrop,
     justifyContent: 'flex-end',
   },
   tutSheet: {
-    backgroundColor: '#f7f7fc',
+    backgroundColor: KAWAII.card,
+    borderWidth: 4,
+    borderBottomWidth: 0,
+    borderColor: KAWAII.cardBorder,
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     padding: 20,
@@ -788,14 +844,14 @@ const styles = StyleSheet.create({
   },
   tutSectionTitle: {
     fontFamily: FONT,
-    color: '#9B59B6',
-    fontSize: 10,
-    fontWeight: '800',
+    color: KAWAII.orange,
+    fontSize: 11,
+    fontWeight: '900',
     letterSpacing: 2.5,
     marginBottom: 12,
     paddingBottom: 6,
-    borderBottomWidth: 1,
-    borderBottomColor: '#2A2A50',
+    borderBottomWidth: 2,
+    borderBottomColor: '#FFC2E0',
   },
   tutEntry: {
     flexDirection: 'row',
@@ -814,27 +870,27 @@ const styles = StyleSheet.create({
   },
   tutEntryName: {
     fontFamily: FONT,
-    color: '#000000',
+    color: KAWAII.ink,
     fontSize: 14,
     fontWeight: '800',
     marginBottom: 3,
   },
   tutEntryDesc: {
     fontFamily: FONT,
-    color: '#000000',
+    color: KAWAII.inkSoft,
     fontSize: 12,
     lineHeight: 19,
   },
   tutCloseBtn: {
-    backgroundColor: '#9B59B6',
-    borderRadius: 18,
+    ...KAWAII_BTN,
+    backgroundColor: KAWAII.pink,
     paddingVertical: 14,
     alignItems: 'center',
     marginTop: 10,
   },
   tutCloseBtnText: {
     fontFamily: FONT,
-    color: '#FFF',
+    color: KAWAII.ink,
     fontWeight: '800',
     fontSize: 16,
   },

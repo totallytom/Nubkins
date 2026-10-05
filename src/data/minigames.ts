@@ -11,6 +11,15 @@ export const MINI_GAMES: MiniGameDef[] = [
     maxPlaysPerDay: 4,
   },
   {
+    id: 'slide-catch',
+    name: 'Slide Catch',
+    description: 'Drag rows and columns of the cross to line up 3+ matching Nubkins and pop them!',
+    emoji: '',
+    baseCoinsPerPlay: 40,
+    baseXpPerPlay: 30,
+    maxPlaysPerDay: 4,
+  },
+  {
     id: 'nub-catch',
     name: 'Nub Catch',
     description: 'Drag the paddle to catch falling stars. Build streaks for bonus points!',

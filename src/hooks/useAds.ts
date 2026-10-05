@@ -1,4 +1,4 @@
-import { Platform } from 'react-native';
+import { Alert, Platform } from 'react-native';
 import Constants from 'expo-constants';
 import Purchases from 'react-native-purchases';
 import { useGameStore } from '../store/useGameStore';
@@ -96,5 +96,29 @@ export function useAds() {
     }
   }
 
-  return { adsRemoved, showRewardedAd, showInterstitialAd, purchaseRemoveAds };
+  // Re-syncs purchases with the App Store / Play Store (e.g. on a new phone or
+  // after reinstalling). Only Remove Ads can come back — diamonds are consumables.
+  async function restorePurchases(): Promise<'restored' | 'nothing'> {
+    if (IS_EXPO_GO) return 'nothing';
+    const info = await Purchases.restorePurchases();
+    const active = !!info.entitlements.active[REMOVE_ADS_ENTITLEMENT];
+    setAdsRemoved(active);
+    return active ? 'restored' : 'nothing';
+  }
+
+  return { adsRemoved, showRewardedAd, showInterstitialAd, purchaseRemoveAds, restorePurchases };
+}
+
+// Shared Restore Purchases flow (Settings + Diamond Store) with user-facing alerts.
+export async function runRestoreWithAlerts(restore: () => Promise<'restored' | 'nothing'>) {
+  try {
+    const result = await restore();
+    if (result === 'restored') {
+      Alert.alert('Purchases Restored', 'Remove Ads is active again. Thanks for your support!');
+    } else {
+      Alert.alert('Nothing to Restore', 'No previous purchases were found for this Apple / Google account.');
+    }
+  } catch {
+    Alert.alert('Restore Failed', 'Could not reach the store. Check your connection and try again.');
+  }
 }

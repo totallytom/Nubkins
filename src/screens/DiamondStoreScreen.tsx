@@ -16,14 +16,14 @@ import Purchases, { PurchasesPackage } from 'react-native-purchases';
 import { useGameStore } from '../store/useGameStore';
 import { DIAMOND_BUNDLES } from '../data/diamondBundles';
 import { FONT } from '../lib/theme';
-import { useAds, REMOVE_ADS_PRODUCT_ID } from '../hooks/useAds';
+import { useAds, REMOVE_ADS_PRODUCT_ID, runRestoreWithAlerts } from '../hooks/useAds';
 
 export default function DiamondStoreScreen() {
   const navigation   = useNavigation();
   const diamonds     = useGameStore(s => s.profile.diamonds);
   const gainDiamonds = useGameStore(s => s.gainDiamonds);
 
-  const { adsRemoved, purchaseRemoveAds } = useAds();
+  const { adsRemoved, purchaseRemoveAds, restorePurchases } = useAds();
   const [packages, setPackages] = useState<PurchasesPackage[]>([]);
   const [loading,  setLoading]  = useState<string | null>(null);
   const [fetching, setFetching] = useState(false);
@@ -187,6 +187,20 @@ export default function DiamondStoreScreen() {
           })}
         </View>
 
+        {/* Restore Purchases (App Store requirement for non-consumables like Remove Ads) */}
+        <TouchableOpacity
+          style={styles.restoreBtn}
+          onPress={async () => {
+            setLoading('restore');
+            await runRestoreWithAlerts(restorePurchases);
+            setLoading(null);
+          }}
+          disabled={!!loading}
+          activeOpacity={0.7}
+        >
+          <Text style={styles.restoreText}>{loading === 'restore' ? 'Restoring…' : 'Restore Purchases'}</Text>
+        </TouchableOpacity>
+
         {/* Footer */}
         <View style={styles.footer}>
           <Text style={styles.footerText}>
@@ -301,4 +315,14 @@ const styles = StyleSheet.create({
   },
   footerIcon: { fontSize: 16 },
   footerText: { fontFamily: FONT, color: '#555577', fontSize: 11, lineHeight: 17, flex: 1 },
+  restoreBtn: {
+    alignSelf: 'center',
+    marginTop: 18,
+    paddingVertical: 8,
+    paddingHorizontal: 18,
+    borderRadius: 14,
+    borderWidth: 1.5,
+    borderColor: '#555577',
+  },
+  restoreText: { fontFamily: FONT, color: '#333355', fontSize: 13, fontWeight: '800' },
 });

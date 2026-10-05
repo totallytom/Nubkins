@@ -1,39 +1,22 @@
-﻿import React, { useRef, useState } from 'react';
-import {
-  Animated,
-  Image,
-  ImageBackground,
-  Modal,
-  PanResponder,
-  Pressable,
-  ScrollView,
-  Alert,
-  StyleSheet,
-  Text,
-  TouchableOpacity,
-  View,
-} from 'react-native';
+import React, { useState } from 'react';
+import { Image, ImageBackground, ScrollView, StyleSheet, Text, TouchableOpacity, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useNavigation } from '@react-navigation/native';
 import { useGameStore } from '../store/useGameStore';
 import { COSMETICS } from '../data/cosmetics';
-import { Cosmetic, CosmeticType } from '../types';
-import CoinDisplay from '../components/CoinDisplay';
-import NubkinCreature from '../components/NubkinCreature';
-import { FONT } from '../lib/theme';
-import { getThemeById } from '../data/themes';
 import { COINS_PER_DIAMOND } from '../data/economy';
+import { SHOP_CATEGORIES, shopItemsOf } from '../data/shopCategories';
+import { Cosmetic } from '../types';
+import { FONT, KAWAII, KAWAII_BTN } from '../lib/theme';
+import CoinDisplay from '../components/CoinDisplay';
 import TooltipCard from '../components/TooltipCard';
+import CosmeticPreviewModal, { RARITY_COLOR } from '../components/shop/CosmeticPreviewModal';
+import CoinExchangeModal from '../components/shop/CoinExchangeModal';
 import { useTooltip } from '../hooks/useTooltip';
 
-const TABS: { id: CosmeticType | 'all'; label: string }[] = [
-  { id: 'all',        label: 'All'        },
-  { id: 'skin',       label: 'Skins'      },
-  { id: 'accessory',  label: 'Accessories' },
-  { id: 'tattoo',     label: 'Tattoos'    },
-  { id: 'special',    label: 'Special'    },
-  { id: 'background', label: 'Themes'     },
-];
+const DIAMOND_IMG = require('../../assets/currency/Diamond.png');
+const COIN_IMG    = require('../../assets/currency/Coin.png');
 
 const FEATURED_IDS = [
   'skin-starry', 'acc-fighthat', 'acc-frostcrown', 'acc-halo',
@@ -46,409 +29,76 @@ function getDailyFeatured(): Cosmetic | null {
   return COSMETICS.find(c => c.id === id) ?? null;
 }
 
-const RARITY_COLOR: Record<string, string> = {
-  common:    '#7777AA',
-  rare:      '#3498DB',
-  epic:      '#9B59B6',
-  legendary: '#F39C12',
-};
-
+// Shop hub: currency actions, today's featured item, and a card per category.
+// Each category opens its own page (ShopCategoryScreen).
 export default function ShopScreen() {
+  // The circle tab bar floats over the screen; keep content clear of it.
+  const tabBarHeight = useBottomTabBarHeight();
   const navigation = useNavigation<any>();
-  const profile               = useGameStore(s => s.profile);
-  const creature               = useGameStore(s => s.creature);
-  const buyCosmetic            = useGameStore(s => s.buyCosmetic);
-  const equipSkin              = useGameStore(s => s.equipSkin);
-  const equipAccessory         = useGameStore(s => s.equipAccessory);
-  const equipTattoo            = useGameStore(s => s.equipTattoo);
-  const equipSpecial           = useGameStore(s => s.equipSpecial);
-  const convertCoinsToDiamonds = useGameStore(s => s.convertCoinsToDiamonds);
-  const themeId                = useGameStore(s => s.themeId);
-  const setTheme                = useGameStore(s => s.setTheme);
-  const activeTheme = getThemeById(themeId);
-
-  const [tab,           setTab]           = useState<CosmeticType | 'all'>('all');
-  const [preview,       setPreview]       = useState<Cosmetic | null>(null);
-  const [previewSkin,    setPreviewSkin]    = useState(creature.equippedSkinId);
-  const [previewAcc,     setPreviewAcc]     = useState(creature.equippedAccessoryId);
-  const [previewTattoo,  setPreviewTattoo]  = useState(creature.equippedTattooId);
-  const [previewSpecial, setPreviewSpecial] = useState(creature.equippedSpecialId);
-  const [convertOpen,           setConvertOpen]           = useState(false);
-  const [convertAmount,         setConvertAmount]         = useState(0);
-  const [convertTrackWidth,     setConvertTrackWidth]     = useState(0);
+  const profile    = useGameStore(s => s.profile);
   const shopTooltip = useTooltip('first_shop');
-  const [floatEmoji, setFloatEmoji]  = useState('');
-  const floatY  = useRef(new Animated.Value(-100)).current;
-  const floatOp = useRef(new Animated.Value(0)).current;
 
-  function triggerItemFloat(emoji: string) {
-    setFloatEmoji(emoji);
-    floatY.setValue(-100);
-    floatOp.setValue(1);
-    Animated.sequence([
-      Animated.spring(floatY, { toValue: 160, useNativeDriver: true, speed: 7, bounciness: 10 }),
-      Animated.delay(380),
-      Animated.timing(floatOp, { toValue: 0, duration: 280, useNativeDriver: true }),
-    ]).start(() => setFloatEmoji(''));
-  }
+  const [preview,      setPreview]      = useState<Cosmetic | null>(null);
+  const [exchangeOpen, setExchangeOpen] = useState(false);
 
   const diamondsAvailable = Math.floor(profile.coins / COINS_PER_DIAMOND);
-  const coinsAfter        = profile.coins - diamondsAvailable * COINS_PER_DIAMOND;
   const progressPct       = Math.min((profile.coins % COINS_PER_DIAMOND) / COINS_PER_DIAMOND, 1);
-
-  const spendCoins   = convertAmount * COINS_PER_DIAMOND;
-  const remainCoins  = profile.coins - spendCoins;
-
-  function openConvertModal() {
-    setConvertAmount(diamondsAvailable);
-    setConvertOpen(true);
-  }
-
-  function updateConvertFromX(x: number) {
-    if (diamondsAvailable < 1 || convertTrackWidth <= 0) return;
-    const pct = Math.max(0, Math.min(1, x / convertTrackWidth));
-    setConvertAmount(Math.max(1, Math.round(pct * diamondsAvailable)));
-  }
-
-  const convertPanResponder = PanResponder.create({
-    onStartShouldSetPanResponder: () => true,
-    onMoveShouldSetPanResponder:  () => true,
-    onPanResponderGrant: e => updateConvertFromX(e.nativeEvent.locationX),
-    onPanResponderMove:  e => updateConvertFromX(e.nativeEvent.locationX),
-  });
-
-  const visibleItems  = COSMETICS.filter(c => tab === 'all' || c.type === tab);
-  const featuredItem  = getDailyFeatured();
-
-  function handleSelectPreview(item: Cosmetic) {
-    setPreview(item);
-    if (item.type === 'skin')      setPreviewSkin(item.id);
-    if (item.type === 'accessory') setPreviewAcc(item.id);
-    if (item.type === 'tattoo')    setPreviewTattoo(item.id);
-    if (item.type === 'special')   setPreviewSpecial(item.id);
-  }
-
-  function handleClosePreview() {
-    setPreview(null);
-    setPreviewSkin(creature.equippedSkinId);
-    setPreviewAcc(creature.equippedAccessoryId);
-    setPreviewTattoo(creature.equippedTattooId);
-    setPreviewSpecial(creature.equippedSpecialId);
-  }
-
-  function handleBuyOrEquip(item: Cosmetic) {
-    const owned = profile.ownedCosmeticIds.includes(item.id);
-    if (owned) {
-      if (item.type === 'skin')             equipSkin(item.id);
-      else if (item.type === 'accessory')   equipAccessory(item.id);
-      else if (item.type === 'tattoo')      equipTattoo(item.id);
-      else if (item.type === 'special')     equipSpecial(item.id);
-      else if (item.type === 'background')  setTheme(item.id);
-      handleClosePreview();
-      return;
-    }
-
-    if (item.unlockLevel && creature.level < item.unlockLevel) {
-      Alert.alert('Locked!', `Reach level ${item.unlockLevel} to unlock this item.`);
-      return;
-    }
-
-    const costStr = item.priceDiamond > 0
-      ? `${item.priceDiamond} diamonds`
-      : `${item.priceCoin} coins`;
-    const haveEnough = item.priceDiamond > 0
-      ? profile.diamonds >= item.priceDiamond
-      : profile.coins >= item.priceCoin;
-
-    if (!haveEnough) {
-      Alert.alert('Not enough!', `You need ${costStr}.`);
-      return;
-    }
-
-    Alert.alert(
-      `Buy ${item.name}?`,
-      `This costs ${costStr}.`,
-      [
-        { text: 'Cancel', style: 'cancel' },
-        {
-          text: 'Buy & Equip',
-          onPress: () => {
-            const ok = buyCosmetic(item.id, item.priceCoin, item.priceDiamond);
-            if (ok) {
-              if (item.type === 'skin')             equipSkin(item.id);
-              else if (item.type === 'accessory')   equipAccessory(item.id);
-              else if (item.type === 'tattoo')      equipTattoo(item.id);
-              else if (item.type === 'special')     equipSpecial(item.id);
-              else if (item.type === 'background')  setTheme(item.id);
-              handleClosePreview();
-              if (item.type !== 'background') {
-                triggerItemFloat(item.emoji ?? '✨');
-              }
-            }
-          },
-        },
-      ]
-    );
-  }
-
-  function handleConfirmConvert() {
-    const ok = convertCoinsToDiamonds(convertAmount);
-    if (ok) setConvertOpen(false);
-  }
-
-  const previewAccCosmetic       = previewAcc ? COSMETICS.find(c => c.id === previewAcc) : null;
-  const previewAccessoryEmoji    = previewAccCosmetic?.emoji ?? null;
-  const previewAccessoryImage    = previewAccCosmetic?.image ?? null;
-  const previewAccessoryImgStyle = previewAccCosmetic?.imageStyle ?? undefined;
-  const previewTattooCosmetic    = previewTattoo ? COSMETICS.find(c => c.id === previewTattoo) : null;
-  const previewTattooImage       = previewTattooCosmetic?.image ?? undefined;
-  const previewTattooImgStyle    = previewTattooCosmetic?.imageStyle ?? undefined;
-  const previewSpecialCosmetic   = previewSpecial ? COSMETICS.find(c => c.id === previewSpecial) : null;
-  const previewSpecialImage      = previewSpecialCosmetic?.image ?? undefined;
-  const previewSpecialImgStyle   = previewSpecialCosmetic?.imageStyle ?? undefined;
+  const featuredItem      = getDailyFeatured();
+  const featuredOwned     = !!featuredItem && profile.ownedCosmeticIds.includes(featuredItem.id);
 
   return (
-    <ImageBackground
-      source={require('../../assets/bg/shopbg.png')}
-      style={styles.bgImage}
-      resizeMode="stretch"
-    >
+    <ImageBackground source={require('../../assets/bg/shopbg.png')} style={styles.bg} resizeMode="stretch">
       <View style={styles.bgOverlay} />
-    <SafeAreaView style={styles.safe} edges={['top']}>
+      <SafeAreaView style={[styles.safe, { paddingBottom: tabBarHeight }]} edges={['top']}>
+        <ScrollView contentContainerStyle={styles.scroll} showsVerticalScrollIndicator={false}>
 
-      {/* ── Cosmetic preview modal ── */}
-      <Modal visible={preview !== null} transparent animationType="slide" onRequestClose={handleClosePreview}>
-        <Pressable style={styles.previewBackdrop} onPress={handleClosePreview}>
-          <Pressable style={styles.previewSheet} onPress={() => {}}>
-            <View style={styles.modalHandle} />
-            <View style={styles.previewCreatureArea}>
-              {preview?.type === 'special' && preview.image ? (
-                <Image source={preview.image} style={styles.previewSpecialStandalone} resizeMode="contain" />
-              ) : (
-                <NubkinCreature
-                  mood="happy"
-                  skinId={previewSkin}
-                  accessoryEmoji={previewAccessoryEmoji}
-                  accessoryImage={previewAccessoryImage}
-                  accessoryImageStyle={previewAccessoryImgStyle}
-                  tattooImage={previewTattooImage}
-                  tattooImageStyle={previewTattooImgStyle}
-                  specialImage={previewSpecialImage}
-                  specialImageStyle={previewSpecialImgStyle}
-                  onTap={() => {}}
-                />
-              )}
+          {/* Header */}
+          <View style={styles.header}>
+            <View style={styles.titleWrap}>
+              <Text style={styles.title}>Shop</Text>
+              <Text style={styles.subtitle}>Customize your Nubkin</Text>
             </View>
-            {preview && (
-              <>
-                <View style={styles.previewInfo}>
-                  {preview.image
-                    ? <Image source={preview.image} style={styles.previewImg} resizeMode="contain" />
-                    : <Text style={styles.previewEmoji}>{preview.emoji}</Text>
-                  }
-                  <View>
-                    <Text style={styles.previewName}>{preview.name}</Text>
-                    <Text style={[styles.rarityBadge, { color: RARITY_COLOR[preview.rarity] }]}>
-                      {preview.rarity.toUpperCase()}
-                    </Text>
-                  </View>
-                </View>
-                <Text style={styles.previewDesc}>{preview.description}</Text>
-                {preview.unlockLevel && creature.level < preview.unlockLevel && (
-                  <View style={styles.lockBanner}>
-                    <Text style={styles.lockText}>Requires Level {preview.unlockLevel}</Text>
-                  </View>
-                )}
-                {preview.achievementScores && !profile.ownedCosmeticIds.includes(preview.id) && (
-                  <View style={[styles.lockBanner, { backgroundColor: '#F39C1222', borderWidth: 1, borderColor: '#F39C1266' }]}>
-                    {preview.achievementScores.map(req => (
-                      <Text key={req.gameId} style={[styles.lockText, { color: '#F39C12' }]}>
-                        {req.score.toLocaleString()}+ in{' '}
-                        {req.gameId.split('-').map(w => w[0].toUpperCase() + w.slice(1)).join(' ')}
-                      </Text>
-                    ))}
-                  </View>
-                )}
-                <TouchableOpacity
-                  style={[
-                    styles.buyBtn,
-                    profile.ownedCosmeticIds.includes(preview.id) && styles.equipBtn,
-                    (preview.achievementScores && !profile.ownedCosmeticIds.includes(preview.id)) && styles.lockedBtn,
-                  ]}
-                  onPress={() => {
-                    if (preview.achievementScores && !profile.ownedCosmeticIds.includes(preview.id)) return;
-                    handleBuyOrEquip(preview);
-                  }}
-                >
-                  <Text style={styles.buyBtnText}>
-                    {profile.ownedCosmeticIds.includes(preview.id)
-                      ? (creature.equippedSkinId === preview.id || creature.equippedAccessoryId === preview.id || creature.equippedTattooId === preview.id || creature.equippedSpecialId === preview.id)
-                        ? '✓ Equipped'
-                        : 'Equip'
-                      : preview.achievementScores
-                        ? 'Locked'
-                        : preview.priceDiamond > 0
-                          ? `Buy for ${preview.priceDiamond} diamonds`
-                          : preview.priceCoin === 0
-                            ? 'Claim Free'
-                            : `Buy for ${preview.priceCoin} coins`
-                    }
-                  </Text>
-                </TouchableOpacity>
-              </>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* ── Convert modal ── */}
-      <Modal visible={convertOpen} transparent animationType="slide" onRequestClose={() => setConvertOpen(false)}>
-        <Pressable style={styles.previewBackdrop} onPress={() => setConvertOpen(false)}>
-          <Pressable style={styles.convertSheet} onPress={() => {}}>
-            <View style={styles.modalHandle} />
-
-            <Text style={styles.convertTitle}>Coin Exchange</Text>
-            <Text style={styles.convertRate}>{COINS_PER_DIAMOND.toLocaleString()} coins = 1 diamond</Text>
-
-            <View style={styles.convertRow}>
-              <View style={styles.convertSide}>
-                <Text style={styles.convertLabel}>You spend</Text>
-                <Text style={styles.convertAmount}>
-                  {spendCoins.toLocaleString()} coins
-                </Text>
-              </View>
-              <Text style={styles.convertArrow}>→</Text>
-              <View style={styles.convertSide}>
-                <Text style={styles.convertLabel}>You receive</Text>
-                <Text style={[styles.convertAmount, { color: '#3498DB' }]}>
-                  {convertAmount} diamonds
-                </Text>
-              </View>
-            </View>
-
-            {diamondsAvailable >= 1 && (
-              <View style={styles.convertSliderWrap}>
-                <View
-                  style={styles.convertSliderTrack}
-                  onLayout={e => setConvertTrackWidth(e.nativeEvent.layout.width)}
-                  {...convertPanResponder.panHandlers}
-                >
-                  <View
-                    style={[styles.convertSliderFill, { width: `${(convertAmount / diamondsAvailable) * 100}%` }]}
-                  />
-                  <View
-                    style={[
-                      styles.convertSliderHandle,
-                      { left: Math.max(0, (convertAmount / diamondsAvailable) * convertTrackWidth - 14) },
-                    ]}
-                  />
-                </View>
-                <View style={styles.convertSliderLabels}>
-                  <Text style={styles.convertSliderMinMax}>1</Text>
-                  <Text style={styles.convertSliderMinMax}>{diamondsAvailable} max</Text>
-                </View>
-              </View>
-            )}
-
-            <View style={styles.convertRemaining}>
-              <Text style={styles.convertRemainingLabel}>Remaining after conversion</Text>
-              <Text style={styles.convertRemainingVal}>{remainCoins.toLocaleString()} coins</Text>
-            </View>
-
-            {diamondsAvailable < 1 ? (
-              <View style={styles.convertShortfall}>
-                <Text style={styles.convertShortfallText}>
-                  Need {(COINS_PER_DIAMOND - profile.coins).toLocaleString()} more coins
-                </Text>
-                <View style={styles.convertProgressTrack}>
-                  <View style={[styles.convertProgressFill, { width: `${Math.round(progressPct * 100)}%` }]} />
-                </View>
-                <Text style={styles.convertProgressLabel}>
-                  {profile.coins.toLocaleString()} / {COINS_PER_DIAMOND.toLocaleString()}
-                </Text>
-              </View>
-            ) : (
-              <TouchableOpacity style={styles.convertBtn} onPress={handleConfirmConvert}>
-                <Text style={styles.convertBtnText}>Convert {convertAmount} diamond{convertAmount === 1 ? '' : 's'}</Text>
-              </TouchableOpacity>
-            )}
-          </Pressable>
-        </Pressable>
-      </Modal>
-
-      {/* ── Fixed top panel (header + tabs + utility banners) ── */}
-      <View style={styles.topPanel}>
-
-        {/* Header */}
-        <View style={styles.header}>
-          <View>
-            <Text style={styles.title}>Shop</Text>
-            <Text style={styles.subtitle}>Customize your Nubkin</Text>
+            <CoinDisplay coins={profile.coins} diamonds={profile.diamonds} />
           </View>
-          <CoinDisplay coins={profile.coins} diamonds={profile.diamonds} />
-        </View>
 
-        {/* Tabs */}
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabsRow} contentContainerStyle={styles.tabs}>
-          {TABS.map(t => (
+          {/* Currency actions — two separate buttons */}
+          <View style={styles.currencyRow}>
             <TouchableOpacity
-              key={t.id}
-              style={[styles.tab, tab === t.id && styles.tabActive]}
-              onPress={() => setTab(t.id)}
+              style={[styles.currencyBtn, { backgroundColor: KAWAII.sky }]}
+              onPress={() => navigation.navigate('DiamondStore')}
+              activeOpacity={0.8}
             >
-              <Text style={[styles.tabText, tab === t.id && styles.tabTextActive]}>{t.label}</Text>
+              <Image source={DIAMOND_IMG} style={styles.currencyIcon} resizeMode="contain" />
+              <Text style={styles.currencyTitle}>Get Diamonds</Text>
+              <Text style={styles.currencySub}>Diamond bundles</Text>
             </TouchableOpacity>
-          ))}
-        </ScrollView>
 
-        {/* Get Diamonds */}
-        <TouchableOpacity style={styles.gemBanner} onPress={() => navigation.navigate('DiamondStore')} activeOpacity={0.8}>
-          <Image source={require('../../assets/currency/Diamond.png')} style={styles.gemBannerIcon} resizeMode="contain" />
-          <View style={styles.gemBannerText}>
-            <Text style={styles.gemBannerTitle}>Get Diamonds</Text>
-            <Text style={styles.gemBannerSub}>Buy bundles to unlock premium items</Text>
-          </View>
-          <Text style={styles.gemBannerArrow}>›</Text>
-        </TouchableOpacity>
-
-        {/* Coin Exchange */}
-        <TouchableOpacity style={styles.convertBanner} onPress={openConvertModal} activeOpacity={0.8}>
-          <View style={styles.convertBannerLeft}>
-            <Text style={styles.convertBannerIcon}>Coins→Diamonds</Text>
-            <View>
-              <Text style={styles.convertBannerTitle}>Coin Exchange</Text>
-              {diamondsAvailable >= 1
-                ? <Text style={styles.convertBannerSub}>Ready: convert {diamondsAvailable} dias now!</Text>
-                : <Text style={styles.convertBannerSub}>{profile.coins.toLocaleString()} / {COINS_PER_DIAMOND.toLocaleString()} coins</Text>
-              }
-            </View>
-          </View>
-          <View style={styles.convertBannerRight}>
-            {diamondsAvailable >= 1
-              ? <View style={styles.convertReadyBadge}><Text style={styles.convertReadyText}>Convert</Text></View>
-              : <View style={styles.convertProgressMini}>
-                  <View style={[styles.convertProgressMiniFill, { width: `${Math.round(progressPct * 100)}%` }]} />
-                </View>
-            }
-          </View>
-        </TouchableOpacity>
-
-      </View>{/* end topPanel */}
-
-      {/* ── Item grid ── */}
-      <ScrollView style={styles.itemsScroll} contentContainerStyle={styles.scrollContent}>
-
-        {/* Featured card — only on All tab */}
-        {tab === 'all' && featuredItem && (() => {
-          const fOwned = profile.ownedCosmeticIds.includes(featuredItem.id);
-          return (
             <TouchableOpacity
-              style={styles.featuredCard}
-              onPress={() => handleSelectPreview(featuredItem)}
-              activeOpacity={0.82}
+              style={[styles.currencyBtn, { backgroundColor: KAWAII.yellow }]}
+              onPress={() => setExchangeOpen(true)}
+              activeOpacity={0.8}
             >
+              <View style={styles.exchangeIcons}>
+                <Image source={COIN_IMG} style={styles.exchangeIcon} resizeMode="contain" />
+                <Text style={styles.exchangeArrow}>→</Text>
+                <Image source={DIAMOND_IMG} style={styles.exchangeIcon} resizeMode="contain" />
+              </View>
+              <Text style={styles.currencyTitle}>Coin Exchange</Text>
+              {diamondsAvailable >= 1 ? (
+                <Text style={styles.currencySub}>{diamondsAvailable} ready to convert!</Text>
+              ) : (
+                <View style={styles.miniTrack}>
+                  <View style={[styles.miniFill, { width: `${Math.round(progressPct * 100)}%` }]} />
+                </View>
+              )}
+            </TouchableOpacity>
+          </View>
+
+          {/* Featured today */}
+          {featuredItem && (
+            <TouchableOpacity style={styles.featured} onPress={() => setPreview(featuredItem)} activeOpacity={0.85}>
               <View style={styles.featuredBadge}>
-                <Text style={styles.featuredBadgeText}>FEATURED TODAY</Text>
+                <Text style={styles.featuredBadgeText}>⭐ FEATURED TODAY</Text>
               </View>
               <View style={styles.featuredRow}>
                 {featuredItem.image
@@ -462,399 +112,185 @@ export default function ShopScreen() {
                   </Text>
                   <Text style={styles.featuredDesc} numberOfLines={2}>{featuredItem.description}</Text>
                   <View style={styles.featuredFooter}>
-                    {!fOwned && featuredItem.priceDiamond > 0 ? (
+                    {!featuredOwned && featuredItem.priceDiamond > 0 ? (
                       <View style={styles.featuredPriceRow}>
                         <Text style={styles.featuredPrice}>{featuredItem.priceDiamond}</Text>
-                        <Image source={require('../../assets/currency/Diamond.png')} style={styles.featuredPriceIcon} resizeMode="contain" />
+                        <Image source={DIAMOND_IMG} style={styles.featuredPriceIcon} resizeMode="contain" />
                       </View>
                     ) : (
                       <Text style={styles.featuredPrice}>
-                        {fOwned ? 'Owned' : featuredItem.priceCoin === 0 ? 'Free' : `${featuredItem.priceCoin} coins`}
+                        {featuredOwned ? 'Owned' : featuredItem.priceCoin === 0 ? 'Free' : `${featuredItem.priceCoin} coins`}
                       </Text>
                     )}
-                    <View style={[styles.featuredBtn, fOwned && styles.featuredBtnOwned]}>
-                      <Text style={styles.featuredBtnText}>{fOwned ? 'Equip' : 'View'}</Text>
+                    <View style={[styles.featuredBtn, featuredOwned && { backgroundColor: KAWAII.mint }]}>
+                      <Text style={styles.featuredBtnText}>{featuredOwned ? 'Equip' : 'View'}</Text>
                     </View>
                   </View>
                 </View>
               </View>
             </TouchableOpacity>
-          );
-        })()}
+          )}
 
-        <View style={styles.grid}>
-        {visibleItems.map(item => {
-          const owned   = profile.ownedCosmeticIds.includes(item.id);
-          const equipped = item.type === 'skin'
-            ? creature.equippedSkinId === item.id
-            : item.type === 'tattoo'
-              ? creature.equippedTattooId === item.id
-              : item.type === 'special'
-                ? creature.equippedSpecialId === item.id
-                : item.type === 'background'
-                  ? themeId === item.id
-                  : creature.equippedAccessoryId === item.id;
-          const locked  = !!(item.unlockLevel && creature.level < item.unlockLevel);
-          const achievementLocked = !!(item.achievementScores && !owned);
-
-          return (
-            <TouchableOpacity
-              key={item.id}
-              style={[styles.itemCard, equipped && styles.itemCardEquipped]}
-              onPress={() => handleSelectPreview(item)}
-              activeOpacity={0.8}
-            >
-              {item.image
-                ? <Image source={item.image} style={styles.itemImg} resizeMode="contain" />
-                : <Text style={styles.itemEmoji}>{item.emoji}</Text>
-              }
-              <Text style={styles.itemName} numberOfLines={1}>{item.name}</Text>
-              <Text style={[styles.itemRarity, { color: RARITY_COLOR[item.rarity] }]}>{item.rarity}</Text>
-              {equipped ? (
-                <View style={[styles.pricePill, { backgroundColor: '#9B59B633', borderColor: '#9B59B6' }]}>
-                  <Text style={{ color: '#9B59B6', fontWeight: '800', fontSize: 11 }}>On</Text>
-                </View>
-              ) : owned ? (
-                <View style={[styles.pricePill, { backgroundColor: '#27AE6033', borderColor: '#27AE60' }]}>
-                  <Text style={{ color: '#27AE60', fontWeight: '700', fontSize: 11 }}>Owned</Text>
-                </View>
-              ) : locked ? (
-                <View style={[styles.pricePill, { backgroundColor: '#55557733', borderColor: '#555577' }]}>
-                  <Text style={{ fontFamily: FONT, color: '#7777AA', fontSize: 10 }}>Lv{item.unlockLevel}</Text>
-                </View>
-              ) : achievementLocked ? (
-                <View style={[styles.pricePill, { backgroundColor: '#F39C1233', borderColor: '#F39C12' }]}>
-                  <Text style={{ fontFamily: FONT, color: '#F39C12', fontSize: 10 }}>Achievement</Text>
-                </View>
-              ) : item.priceCoin === 0 && item.priceDiamond === 0 ? (
-                <View style={[styles.pricePill, { backgroundColor: '#27AE6033', borderColor: '#27AE60' }]}>
-                  <Text style={{ fontFamily: FONT, color: '#27AE60', fontWeight: '700', fontSize: 11 }}>Free</Text>
-                </View>
-              ) : item.priceDiamond > 0 ? (
-                <View style={[styles.pricePill, { backgroundColor: '#3498DB33', borderColor: '#3498DB' }]}>
-                  <Text style={{ fontFamily: FONT, color: '#3498DB', fontWeight: '700', fontSize: 11 }}>{item.priceDiamond} gems</Text>
-                </View>
-              ) : (
-                <View style={[styles.pricePill, { backgroundColor: '#F39C1233', borderColor: '#F39C12' }]}>
-                  <Text style={{ fontFamily: FONT, color: '#F39C12', fontWeight: '700', fontSize: 11 }}>{item.priceCoin} coins</Text>
-                </View>
-              )}
-            </TouchableOpacity>
-          );
-        })}
-        </View>
-
-        {visibleItems.length === 0 && (
-          <View style={styles.emptyState}>
-            <Text style={styles.emptyEmoji}>🌟</Text>
-            <Text style={styles.emptyTitle}>Coming Soon</Text>
-            <Text style={styles.emptyDesc}>More items are on the way!</Text>
+          {/* Categories — each opens its own page */}
+          <View style={styles.sectionWrap}>
+            <Text style={styles.sectionLabel}>Browse</Text>
           </View>
-        )}
+          {SHOP_CATEGORIES.map(cat => {
+            const items = shopItemsOf(cat.type);
+            const owned = items.filter(i => profile.ownedCosmeticIds.includes(i.id)).length;
+            return (
+              <TouchableOpacity
+                key={cat.type}
+                style={[styles.categoryCard, { backgroundColor: cat.color }]}
+                onPress={() => navigation.navigate('ShopCategory', { type: cat.type })}
+                activeOpacity={0.85}
+              >
+                <View style={styles.categoryIconWrap}>
+                  {cat.icon
+                    ? <Image source={cat.icon} style={styles.categoryIcon} resizeMode="contain" />
+                    : <Text style={styles.categoryEmoji}>{cat.emoji}</Text>
+                  }
+                </View>
+                <View style={styles.categoryText}>
+                  <Text style={styles.categoryTitle}>{cat.title}</Text>
+                  <Text style={styles.categoryBlurb}>{cat.blurb}</Text>
+                  <Text style={styles.categoryCount}>{items.length} items · {owned} owned</Text>
+                </View>
+                <Text style={styles.categoryArrow}>›</Text>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
 
-      </ScrollView>
+        <CosmeticPreviewModal item={preview} onClose={() => setPreview(null)} />
+        <CoinExchangeModal visible={exchangeOpen} onClose={() => setExchangeOpen(false)} />
 
-      {/* Accessory float-down — appears when a new item is first equipped */}
-      {floatEmoji !== '' && (
-        <Animated.View pointerEvents="none" style={[styles.floatOverlay, { opacity: floatOp, transform: [{ translateY: floatY }] }]}>
-          <Text style={styles.floatEmoji}>{floatEmoji}</Text>
-        </Animated.View>
-      )}
-
-      <TooltipCard
-        visible={shopTooltip.visible}
-        icon="🛍️"
-        title="Welcome to the Shop!"
-        message="Spend coins on common items and diamonds on rare cosmetics. Earn diamonds from daily logins and milestone levels!"
-        onDismiss={shopTooltip.dismiss}
-      />
-
-    </SafeAreaView>
+        <TooltipCard
+          visible={shopTooltip.visible}
+          icon="🛍️"
+          title="Welcome to the Shop!"
+          message="Spend coins on common items and diamonds on rare cosmetics. Earn diamonds from daily logins and milestone levels!"
+          onDismiss={shopTooltip.dismiss}
+        />
+      </SafeAreaView>
     </ImageBackground>
   );
 }
 
 const styles = StyleSheet.create({
-  bgImage:      { flex: 1 },
-  floatOverlay: { position: 'absolute', top: 0, left: 0, right: 0, alignItems: 'center', zIndex: 999, pointerEvents: 'none' },
-  floatEmoji:   { fontSize: 60 },
+  bg:        { flex: 1 },
   bgOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(255,235,180,0.18)' },
   safe:      { flex: 1, backgroundColor: 'transparent' },
-  header:   { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', padding: 16, paddingBottom: 0 },
+  scroll:    { padding: 16, paddingBottom: 24, gap: 12 },
 
-  topPanel: {
-    backgroundColor: '#ffffff',
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 2 },
-    shadowOpacity: 0.07,
-    shadowRadius: 4,
-    elevation: 3,
-  },
-  itemsScroll:   { flex: 1 },
-  scrollContent: { paddingBottom: 40 },
+  header:    { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  titleWrap: { backgroundColor: 'rgba(255,246,251,0.9)', borderRadius: 14, paddingHorizontal: 12, paddingVertical: 6 },
+  title:     { fontFamily: FONT, color: KAWAII.ink, fontSize: 26, fontWeight: '900' },
+  subtitle:  { fontFamily: FONT, color: KAWAII.inkSoft, fontSize: 12, marginTop: 2 },
 
-  // Featured card
-  featuredCard: {
-    marginHorizontal: 12,
-    marginBottom: 14,
-    marginTop: 4,
-    backgroundColor: '#ffffffee',
-    borderRadius: 20,
-    padding: 16,
-    borderWidth: 1.5,
-    borderColor: '#C9A84C',
-    shadowColor: '#B8860B',
-    shadowOpacity: 0.18,
-    shadowRadius: 8,
-    shadowOffset: { width: 0, height: 3 },
-    elevation: 4,
-  },
-  featuredBadge: {
-    alignSelf: 'flex-start',
-    backgroundColor: '#C9A84C',
-    borderRadius: 8,
-    paddingHorizontal: 10,
-    paddingVertical: 3,
-    marginBottom: 10,
-  },
-  featuredBadgeText: { fontFamily: FONT, color: '#FFF', fontSize: 10, fontWeight: '900', letterSpacing: 1.2 },
-  featuredRow:  { flexDirection: 'row', alignItems: 'center', gap: 14 },
-  featuredImg:  { width: 88, height: 88 },
-  featuredEmoji: { fontSize: 56, width: 88, textAlign: 'center' },
-  featuredInfo:  { flex: 1, gap: 3 },
-  featuredName:  { fontFamily: FONT, color: '#111', fontSize: 18, fontWeight: '900' },
-  featuredRarity: { fontFamily: FONT, fontSize: 11, fontWeight: '700' },
-  featuredDesc:  { fontFamily: FONT, color: '#666688', fontSize: 12, lineHeight: 17 },
-  featuredFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
-  featuredPrice: { fontFamily: FONT, color: '#C9A84C', fontWeight: '900', fontSize: 14 },
-  featuredPriceRow: { flexDirection: 'row', alignItems: 'center', gap: 4 },
-  featuredPriceIcon: { width: 16, height: 16 },
-  featuredBtn:      { backgroundColor: '#C9A84C', borderRadius: 10, paddingHorizontal: 16, paddingVertical: 7 },
-  featuredBtnOwned: { backgroundColor: '#27AE60' },
-  featuredBtnText:  { fontFamily: FONT, color: '#FFF', fontWeight: '800', fontSize: 13 },
-
-  // Empty state
-  emptyState: { alignItems: 'center', paddingVertical: 48, gap: 8 },
-  emptyEmoji: { fontSize: 40 },
-  emptyTitle: { fontFamily: FONT, color: '#444466', fontWeight: '800', fontSize: 18 },
-  emptyDesc:  { fontFamily: FONT, color: '#9999BB', fontSize: 13 },
-  title:    { fontFamily: FONT, color: '#121212', fontSize: 26, fontWeight: '900' },
-  subtitle: { fontFamily: FONT, color: '#7777AA', fontSize: 13, marginTop: 2 },
-
-  tabsRow: { flexShrink: 0 },
-  tabs: { flexDirection: 'row', alignItems: 'center', paddingHorizontal: 12, paddingVertical: 10, columnGap: 8 },
-  tab: {
-    height: 36,
-    paddingHorizontal: 16,
-    borderRadius: 12,
-    backgroundColor: '#eeeef3',
-    borderWidth: 1,
-    borderColor: '#2D2D4E',
+  // Currency buttons
+  currencyRow: { flexDirection: 'row', gap: 12 },
+  currencyBtn: {
+    ...KAWAII_BTN,
+    flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
-  },
-  tabActive:     { backgroundColor: '#9B59B6', borderColor: '#9B59B6' },
-  tabText:       { fontFamily: FONT, color: '#000000', fontWeight: '700', fontSize: 13 },
-  tabTextActive: { fontFamily: FONT, color: '#FFF' },
-
-  grid: {
-    flexDirection: 'row',
-    flexWrap: 'wrap',
-    padding: 8,
-    gap: 10,
-    justifyContent: 'center',
-  },
-  itemCard: {
-    width: 100,
-    backgroundColor: '#e4e4eb',
-    borderRadius: 16,
-    padding: 12,
-    alignItems: 'center',
-    gap: 4,
-    borderWidth: 1,
-    borderColor: '#2D2D4E',
-  },
-  itemCardEquipped: { borderColor: '#9B59B6', backgroundColor: '#e4e4eb' },
-  itemEmoji:  { fontFamily: FONT, fontSize: 38 },
-  itemImg:    { width: 72, height: 72 },
-  itemName:   { fontFamily: FONT, color: '#000000', fontWeight: '700', fontSize: 11, textAlign: 'center' },
-  itemRarity: { fontFamily: FONT, fontSize: 9, fontWeight: '600', textTransform: 'uppercase' },
-  pricePill: {
-    marginTop: 2,
-    borderRadius: 8,
+    paddingVertical: 12,
     paddingHorizontal: 8,
-    paddingVertical: 3,
-    borderWidth: 1,
+    gap: 3,
   },
-
-  // Preview modal
-  previewBackdrop: { flex: 1, backgroundColor: 'rgba(46, 45, 45, 0.05)', justifyContent: 'flex-end' },
-  previewSheet: {
-    backgroundColor: '#d1d1e0',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: 24,
-    alignItems: 'center',
-    gap: 12,
-  },
-  modalHandle: { width: 40, height: 4, backgroundColor: '#3D3D6B', borderRadius: 2, marginBottom: 8 },
-  previewCreatureArea: { height: 180, justifyContent: 'center', alignItems: 'center' },
-  previewSpecialStandalone: { width: 150, height: 150 },
-  previewInfo: { flexDirection: 'row', alignItems: 'center', gap: 16, alignSelf: 'stretch' },
-  previewEmoji: { fontFamily: FONT, fontSize: 44 },
-  previewImg:   { width: 80, height: 80 },
-  previewName: { fontFamily: FONT, color: '#000000', fontWeight: '800', fontSize: 20 },
-  rarityBadge: { fontFamily: FONT, fontWeight: '700', fontSize: 12, marginTop: 2 },
-  previewDesc: { fontFamily: FONT, color: '#7777AA', fontSize: 14, textAlign: 'center', alignSelf: 'stretch' },
-  lockBanner: {
-    backgroundColor: '#55557733',
-    borderRadius: 10,
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-  },
-  lockText: { fontFamily: FONT, color: '#7777AA', fontWeight: '700' },
-  buyBtn: {
-    backgroundColor: '#9B59B6',
-    paddingHorizontal: 40,
-    paddingVertical: 14,
-    borderRadius: 18,
-    alignSelf: 'stretch',
-    alignItems: 'center',
-    marginTop: 4,
-  },
-  equipBtn:   { backgroundColor: '#27AE60' },
-  lockedBtn:  { backgroundColor: '#555577' },
-  buyBtnText: { fontFamily: FONT, color: '#FFF', fontWeight: '800', fontSize: 16 },
-
-  // ── Get Diamonds banner ────────────────────────────────
-  gemBanner: {
-    marginHorizontal: 12,
-    marginBottom: 10,
-    backgroundColor: '#ffffff',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#3498DB44',
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 14,
-    gap: 12,
-  },
-  gemBannerIcon:  { width: 36, height: 36 },
-  gemBannerText:  { flex: 1 },
-  gemBannerTitle: { fontFamily: FONT, color: '#000000', fontSize: 15, fontWeight: '900' },
-  gemBannerSub:   { fontFamily: FONT, color: '#555577', fontSize: 11, marginTop: 2 },
-  gemBannerArrow: { color: '#000000', fontSize: 24, fontWeight: '700' },
-
-  // ── Conversion banner ──────────────────────────────────
-  convertBanner: {
-    marginHorizontal: 12,
-    marginBottom: 10,
-    backgroundColor: '#ffffff',
-    borderRadius: 14,
-    borderWidth: 1,
-    borderColor: '#3498DB44',
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-  },
-  convertBannerLeft:  { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  convertBannerIcon:  { fontFamily: FONT, fontSize: 15 },
-  convertBannerTitle: { fontFamily: FONT, color: '#000000', fontWeight: '700', fontSize: 13 },
-  convertBannerSub:   { fontFamily: FONT, color: '#7777AA', fontSize: 11, marginTop: 1 },
-  convertBannerRight: { alignItems: 'flex-end' },
-  convertReadyBadge:  { backgroundColor: '#3498DB', borderRadius: 8, paddingHorizontal: 10, paddingVertical: 4 },
-  convertReadyText:   { fontFamily: FONT, color: '#FFF', fontWeight: '800', fontSize: 12 },
-  convertProgressMini: {
-    width: 72,
-    height: 6,
-    backgroundColor: '#2D2D4E',
-    borderRadius: 3,
-    overflow: 'hidden',
-  },
-  convertProgressMiniFill: { height: '100%', backgroundColor: '#F39C12', borderRadius: 3 },
-
-  // ── Convert sheet ──────────────────────────────────────
-  convertSheet: {
-    backgroundColor: '#e6e6fd',
-    borderTopLeftRadius: 28,
-    borderTopRightRadius: 28,
-    padding: 24,
-    alignItems: 'center',
-    gap: 14,
-  },
-  convertTitle: { fontFamily: FONT, color: '#00000c', fontWeight: '900', fontSize: 24 },
-  convertRate:  { fontFamily: FONT, color: '#7777AA', fontSize: 14 },
-  convertRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 16,
-    alignSelf: 'stretch',
-    backgroundColor: '#c6c6d8',
-    borderRadius: 16,
-    padding: 18,
-  },
-  convertSide:   { flex: 1, alignItems: 'center', gap: 4 },
-  convertLabel:  { fontFamily: FONT, color: '#7777AA', fontSize: 12 },
-  convertAmount: { fontFamily: FONT, color: '#f59700', fontWeight: '900', fontSize: 22 },
-  convertArrow:  { fontFamily: FONT, color: '#555577', fontSize: 22, fontWeight: '700' },
-  convertSliderWrap:  { alignSelf: 'stretch', gap: 6 },
-  convertSliderTrack: {
-    height: 32,
-    borderRadius: 16,
-    backgroundColor: '#c6c6d8',
-    justifyContent: 'center',
-    overflow: 'visible',
-  },
-  convertSliderFill: {
-    position: 'absolute',
-    left: 0, top: 0, bottom: 0,
-    backgroundColor: '#3498DB',
-    borderRadius: 16,
-  },
-  convertSliderHandle: {
-    position: 'absolute',
-    width: 28, height: 28, borderRadius: 14,
-    backgroundColor: '#FFFFFF',
-    borderWidth: 2, borderColor: '#3498DB',
-    shadowColor: '#000', shadowOpacity: 0.25, shadowRadius: 3, shadowOffset: { width: 0, height: 1 },
-  },
-  convertSliderLabels: { flexDirection: 'row', justifyContent: 'space-between' },
-  convertSliderMinMax: { fontFamily: FONT, color: '#7777AA', fontSize: 11 },
-  convertRemaining: {
-    alignSelf: 'stretch',
-    backgroundColor: '#bcbcd3',
-    borderRadius: 12,
-    padding: 14,
-    alignItems: 'center',
-    gap: 4,
-  },
-  convertRemainingLabel: { fontFamily: FONT, color: '#00000c', fontSize: 12 },
-  convertRemainingVal:   { fontFamily: FONT, color: '#000000', fontWeight: '700', fontSize: 16 },
-  convertShortfall: { alignSelf: 'stretch', alignItems: 'center', gap: 8 },
-  convertShortfallText: { fontFamily: FONT, color: '#7777AA', fontSize: 14 },
-  convertProgressTrack: {
-    alignSelf: 'stretch',
+  currencyIcon:  { width: 34, height: 34 },
+  currencyTitle: { fontFamily: FONT, color: KAWAII.ink, fontSize: 15, fontWeight: '900' },
+  currencySub:   { fontFamily: FONT, color: KAWAII.ink, fontSize: 11, opacity: 0.75, textAlign: 'center' },
+  exchangeIcons: { flexDirection: 'row', alignItems: 'center', gap: 2, height: 34 },
+  exchangeIcon:  { width: 26, height: 26 },
+  exchangeArrow: { fontFamily: FONT, color: KAWAII.ink, fontSize: 16, fontWeight: '900' },
+  miniTrack: {
+    width: '80%',
     height: 8,
-    backgroundColor: '#2D2D4E',
+    marginTop: 3,
+    backgroundColor: KAWAII.card,
+    borderWidth: 1.5,
+    borderColor: KAWAII.ink,
     borderRadius: 4,
     overflow: 'hidden',
   },
-  convertProgressFill: { height: '100%', backgroundColor: '#F39C12', borderRadius: 4 },
-  convertProgressLabel: { fontFamily: FONT, color: '#555577', fontSize: 12 },
-  convertBtn: {
-    backgroundColor: '#3498DB',
-    paddingHorizontal: 40,
-    paddingVertical: 14,
-    borderRadius: 18,
-    alignSelf: 'stretch',
-    alignItems: 'center',
+  miniFill: { height: '100%', backgroundColor: KAWAII.orange },
+
+  // Featured
+  featured: {
+    backgroundColor: KAWAII.card,
+    borderRadius: 22,
+    padding: 14,
+    borderWidth: 2.5,
+    borderBottomWidth: 5,
+    borderColor: KAWAII.ink,
+  },
+  featuredBadge: {
+    alignSelf: 'flex-start',
+    backgroundColor: KAWAII.yellow,
+    borderWidth: 1.5,
+    borderColor: KAWAII.ink,
+    borderRadius: 10,
+    paddingHorizontal: 10,
+    paddingVertical: 2,
+    marginBottom: 8,
+  },
+  featuredBadgeText: { fontFamily: FONT, color: KAWAII.ink, fontSize: 10, fontWeight: '900', letterSpacing: 1 },
+  featuredRow:    { flexDirection: 'row', alignItems: 'center', gap: 14 },
+  featuredImg:    { width: 84, height: 84 },
+  featuredEmoji:  { fontSize: 54, width: 84, textAlign: 'center' },
+  featuredInfo:   { flex: 1, gap: 2 },
+  featuredName:   { fontFamily: FONT, color: KAWAII.ink, fontSize: 18, fontWeight: '900' },
+  featuredRarity: { fontFamily: FONT, fontSize: 11, fontWeight: '700' },
+  featuredDesc:   { fontFamily: FONT, color: KAWAII.inkSoft, fontSize: 12, lineHeight: 17 },
+  featuredFooter: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', marginTop: 6 },
+  featuredPrice:  { fontFamily: FONT, color: KAWAII.ink, fontWeight: '900', fontSize: 14 },
+  featuredPriceRow:  { flexDirection: 'row', alignItems: 'center', gap: 4 },
+  featuredPriceIcon: { width: 16, height: 16 },
+  featuredBtn: {
+    backgroundColor: KAWAII.pink,
+    borderWidth: 2,
+    borderColor: KAWAII.ink,
+    borderRadius: 12,
+    paddingHorizontal: 16,
+    paddingVertical: 5,
+  },
+  featuredBtnText: { fontFamily: FONT, color: KAWAII.ink, fontWeight: '900', fontSize: 13 },
+
+  // Categories
+  sectionWrap: {
+    alignSelf: 'flex-start',
+    backgroundColor: KAWAII.card,
+    borderRadius: 12,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
     marginTop: 4,
   },
-  convertBtnText: { fontFamily: FONT, color: '#FFF', fontWeight: '800', fontSize: 16 },
+  sectionLabel: { fontFamily: FONT, color: KAWAII.ink, fontSize: 15, fontWeight: '900' },
+  categoryCard: {
+    ...KAWAII_BTN,
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 10,
+    paddingHorizontal: 12,
+    gap: 12,
+  },
+  categoryIconWrap: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: KAWAII.card,
+    borderWidth: 2,
+    borderColor: KAWAII.ink,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  categoryIcon:  { width: 48, height: 48 },
+  categoryEmoji: { fontSize: 28 },
+  categoryText:  { flex: 1 },
+  categoryTitle: { fontFamily: FONT, color: KAWAII.ink, fontSize: 18, fontWeight: '900' },
+  categoryBlurb: { fontFamily: FONT, color: KAWAII.ink, fontSize: 12, opacity: 0.75 },
+  categoryCount: { fontFamily: FONT, color: KAWAII.ink, fontSize: 11, fontWeight: '800', marginTop: 3 },
+  categoryArrow: { fontFamily: FONT, color: KAWAII.ink, fontSize: 28, fontWeight: '900' },
 });

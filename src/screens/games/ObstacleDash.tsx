@@ -12,7 +12,7 @@ import {
   View,
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Audio } from 'expo-av';
+import { useAudioPlayer } from 'expo-audio';
 
 const { width: SW, height: SH } = Dimensions.get('window');
 
@@ -81,25 +81,12 @@ export default function ObstacleDash({ level, onFinish }: Props) {
   const spawnRef        = useRef<ReturnType<typeof setInterval> | null>(null);
   const finishTimeout   = useRef<ReturnType<typeof setTimeout> | null>(null);
   const laneCooldown    = useRef<number[]>([0, 0, 0]);
-  const jumpSoundRef    = useRef<Audio.Sound | null>(null);
+  const jumpSound    = useAudioPlayer(require('../../../assets/audio/jumping.wav'));
   const saveMeRef       = useRef(false);   // "crashed, save me?" overlay showing
   const continueUsedRef = useRef(false);   // only one continue allowed per game
   const saveMeAtRef     = useRef(0);       // wall-clock time the prompt opened
 
   const laneAnim = useRef(new Animated.Value(laneX(1))).current;
-
-  useEffect(() => {
-    let cancelled = false;
-    Audio.Sound.createAsync(require('../../../assets/audio/jumping.wav')).then(({ sound }) => {
-      if (cancelled) { sound.unloadAsync(); return; }
-      jumpSoundRef.current = sound;
-    });
-    return () => {
-      cancelled = true;
-      jumpSoundRef.current?.unloadAsync();
-      jumpSoundRef.current = null;
-    };
-  }, []);
 
   const speedMult  = 1 + (level - 1) * 0.15;
   const baseSpeed  = 5 * speedMult;
@@ -367,7 +354,7 @@ export default function ObstacleDash({ level, onFinish }: Props) {
         {/* Left button */}
         <TouchableOpacity
           style={styles.moveBtn}
-          onPress={() => { playSfx(jumpSoundRef.current); moveLane('left'); }}
+          onPress={() => { playSfx(jumpSound); moveLane('left'); }}
           activeOpacity={0.75}
         >
           <Text style={styles.moveBtnText}>◀</Text>
@@ -388,7 +375,7 @@ export default function ObstacleDash({ level, onFinish }: Props) {
         {/* Right button */}
         <TouchableOpacity
           style={styles.moveBtn}
-          onPress={() => { playSfx(jumpSoundRef.current); moveLane('right'); }}
+          onPress={() => { playSfx(jumpSound); moveLane('right'); }}
           activeOpacity={0.75}
         >
           <Text style={styles.moveBtnText}>▶</Text>

@@ -90,6 +90,7 @@ export default function WardrobeScreen() {
               tattooImageStyle={tattooImageStyle}
               specialImage={specialImage}
               specialImageStyle={specialImageStyle}
+              trait={creature.trait}
               hideGlow
               onTap={() => {}}
             />

@@ -1,0 +1,32 @@
+import { CreatureMood } from '../types';
+
+export type GrowthStage = 'baby' | 'kid' | 'adult';
+
+export const GROWTH_ORDER: GrowthStage[] = ['baby', 'kid', 'adult'];
+
+// Level thresholds. Levels currently cap at 10 (see XP_TABLE in the store).
+export function stageForLevel(level: number): GrowthStage {
+  if (level >= 8) return 'adult';
+  if (level >= 4) return 'kid';
+  return 'baby';
+}
+
+export interface StageLook {
+  label: string;
+  scale: number;          // body size relative to the adult art
+  prop: string | null;    // shared head prop drawn on any skin (emoji placeholder until art exists)
+  bobAmplitude: number;   // idle bounce height (px)
+  bobPeriod: number;      // ms per half-bounce — babies bounce quicker
+}
+
+export const STAGE_LOOK: Record<GrowthStage, StageLook> = {
+  baby:  { label: 'Baby',  scale: 0.72, prop: '🌱', bobAmplitude: 12, bobPeriod: 650 },
+  kid:   { label: 'Kid',   scale: 0.86, prop: '🍃', bobAmplitude: 11, bobPeriod: 820 },
+  adult: { label: 'Adult', scale: 1,    prop: null, bobAmplitude: 10, bobPeriod: 1000 },
+};
+
+// Optional dedicated art per skin and stage. When an entry exists it replaces
+// the scaled adult art for that skin/stage (and the shared prop is skipped).
+// Add skins here one at a time as stage art is drawn, e.g.:
+//   'skin-default': { kid: { happy: require(...), excited: …, neutral: …, sad: …, sleeping: … } },
+export const STAGE_ART: Partial<Record<string, Partial<Record<GrowthStage, Record<CreatureMood, any>>>>> = {};

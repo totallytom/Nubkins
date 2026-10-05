@@ -1,8 +1,25 @@
 import { create } from 'zustand';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { Creature, PlayerProfile, DailyGameRecord, MiniGameId } from '../types';
+import { Creature, PlayerProfile, DailyGameRecord, MiniGameId, Memory, MemoryKind, CreatureMood, Cosmetic } from '../types';
 import { MINI_GAMES } from '../data/minigames';
-import { COSMETICS } from '../data/cosmetics';
+import { COSMETICS, getCosmeticById } from '../data/cosmetics';
+import {
+  BERRY_IDS,
+  DISLIKE_HAPPINESS,
+  DISLIKE_REVEAL_FEEDS,
+  FAVORITE_HAPPINESS,
+  FAVORITE_REVEAL_FEEDS,
+  getFoodById,
+  rollBerryPreferences,
+} from '../data/food';
+import { Anniversary, dayNumber } from '../lib/together';
+import {
+  GREEDY_FEED_HAPPINESS,
+  SLEEPY_AUTO_SLEEP_HOURS,
+  TRAIT_GAME_HAPPINESS,
+  getTrait,
+  rollTrait,
+} from '../data/personality';
 import { DEFAULT_THEME_ID } from '../data/themes';
 import {
   COINS_PER_DIAMOND,
@@ -16,8 +33,11 @@ const STORAGE_KEY_PROFILE  = '@nubkins:profile';
 const STORAGE_KEY_DAILY    = '@nubkins:daily';
 const STORAGE_KEY_THEME    = '@nubkins:themeId';
 const STORAGE_KEY_AUDIO    = '@nubkins:audio';
+const STORAGE_KEY_MEMORIES = '@nubkins:memories';
 
-const XP_TABLE = [0, 100, 250, 450, 700, 1000, 1350, 1750, 2200, 2700, 3250];
+export const MAX_NAME_LENGTH = 12;
+
+const XP_TABLE =[0, 100, 250, 450, 700, 1000, 1350, 1750, 2200, 2700, 3250];
 
 function xpToNext(level: number) {
   return XP_TABLE[Math.min(level, XP_TABLE.length - 1)] ?? 9999;
@@ -46,7 +66,24 @@ function defaultCreature(): Creature {
     lastDecayAt: now,
     sleepingSince: null,
     energyDepletedAt: null,
+    ...rollBerryPreferences(),
+    berryFeeds: {},
+    favoriteRevealed: false,
+    dislikeRevealed: false,
+    celebratedAnniversaries: [],
+    trait: rollTrait(),
   };
+}
+
+// True when this game suits the Nubkin's personality (extra happiness after playing).
+export function traitLovesGame(traitId: Creature['trait'], gameId: MiniGameId): boolean {
+  return !!getTrait(traitId)?.favoriteGames.includes(gameId);
+}
+
+export interface FeedResult {
+  ok: boolean;
+  reaction: 'love' | 'dislike' | null;       // this Nubkin's feelings about the food
+  revealed: 'favorite' | 'dislike' | null;   // set on the feed that reveals a preference
 }
 
 function defaultProfile(): PlayerProfile {
@@ -141,7 +178,8 @@ function applyDecay(creature: Creature): Creature {
     creature.lastWokeAt  ? new Date(creature.lastWokeAt).getTime()  : 0,
     new Date(creature.createdAt).getTime(),
   );
-  const sleepingSince = (now - lastInteraction) / 3_600_000 >= AUTO_SLEEP_HOURS
+  const sleepAfterHours = creature.trait === 'sleepy' ? SLEEPY_AUTO_SLEEP_HOURS : AUTO_SLEEP_HOURS;
+  const sleepingSince = (now - lastInteraction) / 3_600_000 >= sleepAfterHours
     ? nowIso
     : null;
 
@@ -179,8 +217,9 @@ interface GameState {
   save: () => Promise<void>;
   resetCreature: () => void;
 
-  feedCreature: (hungerRestore: number, happinessBonus: number, coinCost: number, energyRestore?: number) => boolean;
+  feedCreature: (hungerRestore: number, happinessBonus: number, coinCost: number, energyRestore?: number, foodId?: string) => FeedResult;
   petCreature: () => void;
+  renameCreature: (name: string) => void;
   cleanCreature: () => void;
   wakeCreature: () => boolean;
 
@@ -206,13 +245,26 @@ interface GameState {
   setAdsRemoved: (v: boolean) => void;
   incrementAdSessionCount: () => number;
 
+  memories: Memory[];
+  addMemory: (kind: MemoryKind, title: string, caption: string, mood?: CreatureMood) => void;
+  hasMemory: (kind: MemoryKind) => boolean;
+  claimAnniversary: (anniversary: Anniversary) => Cosmetic | null;
+
   levelUpEvent: { level: number; diamonds: number } | null;
   clearLevelUpEvent: () => void;
 
   checkIn: () => Promise<{ isNew: boolean; streak: number; coinsEarned: number; diamondsEarned: number; streakBonus: number }>;
 }
 
-export const useGameStore = create<GameState>()((set, get) => ({
+export const useGameStore = create<GameState>()((set, get) => {
+  // Snapshot the first time the Nubkin puts on something new (called after equipping).
+  function recordFirstOutfit(cosmeticId: string) {
+    if (get().hasMemory('first-outfit')) return;
+    const item = getCosmeticById(cosmeticId);
+    get().addMemory('first-outfit', 'New look!', `${get().creature.name} tried on ${item?.name ?? 'something new'} 👗`);
+  }
+
+  return {
   creature: defaultCreature(),
   profile: defaultProfile(),
   daily: defaultDailyRecord(todayStr()),
@@ -220,6 +272,7 @@ export const useGameStore = create<GameState>()((set, get) => ({
   themeId: DEFAULT_THEME_ID,
   levelUpEvent: null,
   clearLevelUpEvent: () => set({ levelUpEvent: null }),
+  memories: [],
   isPlayingGame: false,
   setIsPlayingGame: (v) => set({ isPlayingGame: v }),
 
@@ -248,16 +301,24 @@ export const useGameStore = create<GameState>()((set, get) => ({
 
   load: async () => {
     try {
-      const [rawCreature, rawProfile, rawDaily, rawTheme, rawAudio] = await Promise.all([
+      const [rawCreature, rawProfile, rawDaily, rawTheme, rawAudio, rawMemories] = await Promise.all([
         AsyncStorage.getItem(STORAGE_KEY_CREATURE),
         AsyncStorage.getItem(STORAGE_KEY_PROFILE),
         AsyncStorage.getItem(STORAGE_KEY_DAILY),
         AsyncStorage.getItem(STORAGE_KEY_THEME),
         AsyncStorage.getItem(STORAGE_KEY_AUDIO),
+        AsyncStorage.getItem(STORAGE_KEY_MEMORIES),
       ]);
 
       let creature = rawCreature ? (JSON.parse(rawCreature) as Creature) : defaultCreature();
       creature = applyDecay(creature);
+      // Nubkins saved before berry preferences existed get theirs rolled now.
+      if (!creature.favoriteBerryId || !creature.dislikedBerryId) {
+        creature = { ...creature, ...rollBerryPreferences(), berryFeeds: creature.berryFeeds ?? {} };
+      }
+      // Nubkins saved before personalities existed get one rolled now.
+      if (!creature.trait) creature = { ...creature, trait: rollTrait() };
+      const memories: Memory[] = rawMemories ? JSON.parse(rawMemories) : [];
 
       const savedProfile = rawProfile ? (JSON.parse(rawProfile) as PlayerProfile) : defaultProfile();
       // Migrate legacy profiles that stored gems instead of diamonds
@@ -281,7 +342,7 @@ export const useGameStore = create<GameState>()((set, get) => ({
       const themeId = rawTheme ?? DEFAULT_THEME_ID;
       const audio = rawAudio ? JSON.parse(rawAudio) : {};
       set({
-        creature, profile, daily, themeId, loaded: true,
+        creature, profile, daily, themeId, memories, loaded: true,
         bgmEnabled: audio.bgmEnabled ?? true,
         bgmVolume:  audio.bgmVolume  ?? 0.5,
         sfxEnabled: audio.sfxEnabled ?? true,
@@ -292,11 +353,12 @@ export const useGameStore = create<GameState>()((set, get) => ({
   },
 
   save: async () => {
-    const { creature, profile, daily } = get();
+    const { creature, profile, daily, memories } = get();
     await Promise.all([
       AsyncStorage.setItem(STORAGE_KEY_CREATURE, JSON.stringify(creature)),
       AsyncStorage.setItem(STORAGE_KEY_PROFILE,  JSON.stringify(profile)),
       AsyncStorage.setItem(STORAGE_KEY_DAILY,    JSON.stringify(daily)),
+      AsyncStorage.setItem(STORAGE_KEY_MEMORIES, JSON.stringify(memories)),
     ]);
   },
 
@@ -306,22 +368,52 @@ export const useGameStore = create<GameState>()((set, get) => ({
     get().save();
   },
 
-  feedCreature: (hungerRestore, _happinessBonus, coinCost, energyRestore) => {
+  feedCreature: (hungerRestore, _happinessBonus, coinCost, energyRestore, foodId) => {
     const { profile, creature } = get();
-    if (profile.coins < coinCost) return false;
+    if (profile.coins < coinCost) return { ok: false, reaction: null, revealed: null };
+
+    // Berry preferences: favorites cheer them up, the disliked berry sours the mood,
+    // and each preference is revealed after enough feeds.
+    let happiness = creature.trait === 'greedy'
+      ? Math.min(100, creature.happiness + GREEDY_FEED_HAPPINESS)
+      : creature.happiness;
+    let reaction: FeedResult['reaction'] = null;
+    let revealed: FeedResult['revealed'] = null;
+    let { berryFeeds = {}, favoriteRevealed, dislikeRevealed } = creature;
+    if (foodId && BERRY_IDS.includes(foodId)) {
+      const feeds = (berryFeeds[foodId] ?? 0) + 1;
+      berryFeeds = { ...berryFeeds, [foodId]: feeds };
+      if (foodId === creature.favoriteBerryId) {
+        reaction  = 'love';
+        happiness = Math.min(100, happiness + FAVORITE_HAPPINESS);
+        if (!favoriteRevealed && feeds >= FAVORITE_REVEAL_FEEDS) { favoriteRevealed = true; revealed = 'favorite'; }
+      } else if (foodId === creature.dislikedBerryId) {
+        reaction  = 'dislike';
+        happiness = Math.max(0, happiness + DISLIKE_HAPPINESS);
+        if (!dislikeRevealed && feeds >= DISLIKE_REVEAL_FEEDS) { dislikeRevealed = true; revealed = 'dislike'; }
+      }
+    }
+
     set({
       creature: {
         ...creature,
         hunger:  Math.min(100, creature.hunger + hungerRestore),
+        happiness,
         // Potions unlock energy up to a floor — they never drain energy the Nubkin already has
         energy:  energyRestore ? Math.min(100, Math.max(creature.energy, energyRestore)) : creature.energy,
         lastFed: new Date().toISOString(),
+        berryFeeds,
+        favoriteRevealed,
+        dislikeRevealed,
       },
       profile: { ...profile, coins: profile.coins - coinCost },
     });
+    if (revealed === 'favorite' && foodId) {
+      get().addMemory('favorite-food', 'Favorite food found!', `${creature.name} LOVES ${getFoodById(foodId)?.name ?? 'berries'} 💖`, 'excited');
+    }
     get().gainXP(5);
     get().save();
-    return true;
+    return { ok: true, reaction, revealed };
   },
 
   petCreature: () => {
@@ -335,6 +427,60 @@ export const useGameStore = create<GameState>()((set, get) => ({
     });
     get().gainXP(2);
     get().save();
+  },
+
+  renameCreature: (name) => {
+    const trimmed = name.trim().slice(0, MAX_NAME_LENGTH);
+    if (!trimmed) return;
+    const firstName = !get().creature.named;
+    set({ creature: { ...get().creature, name: trimmed, named: true } });
+    if (firstName) {
+      const trait = getTrait(get().creature.trait);
+      const caption = trait ? `The day we met 💕 A little ${trait.label.toLowerCase()} one ${trait.emoji}` : 'The day we met 💕';
+      get().addMemory('hatch', `Hello, ${trimmed}!`, caption, 'excited');
+    }
+    get().save();
+  },
+
+  addMemory: (kind, title, caption, mood = 'happy') => {
+    const { creature, themeId, memories } = get();
+    const memory: Memory = {
+      id: `${kind}-${Date.now()}-${Math.floor(Math.random() * 1e6)}`,
+      kind, title, caption, mood,
+      date: new Date().toISOString(),
+      daysTogether: dayNumber(creature.createdAt),
+      level: creature.level,
+      skinId: creature.equippedSkinId,
+      accessoryId: creature.equippedAccessoryId,
+      tattooId: creature.equippedTattooId,
+      specialId: creature.equippedSpecialId,
+      themeId,
+    };
+    set({ memories: [...memories, memory] });
+    get().save();
+  },
+
+  hasMemory: (kind) => get().memories.some(m => m.kind === kind),
+
+  claimAnniversary: (anniversary) => {
+    const { creature, profile } = get();
+    const celebrated = creature.celebratedAnniversaries ?? [];
+    if (celebrated.includes(anniversary.days)) return null;
+
+    const reward = COSMETICS.find(c => c.anniversaryDay === anniversary.days) ?? null;
+    const grant  = reward && !profile.ownedCosmeticIds.includes(reward.id);
+    set({
+      creature: { ...creature, celebratedAnniversaries: [...celebrated, anniversary.days] },
+      ...(grant && { profile: { ...profile, ownedCosmeticIds: [...profile.ownedCosmeticIds, reward.id] } }),
+    });
+    get().addMemory(
+      'anniversary',
+      anniversary.title,
+      `${anniversary.days} days with ${creature.name} 💕`,
+      'excited',
+    );
+    get().save();
+    return reward;
   },
 
   cleanCreature: () => {
@@ -378,6 +524,9 @@ export const useGameStore = create<GameState>()((set, get) => ({
       level += 1;
     }
     set({ creature: { ...get().creature, xp, level, xpToNext: xpToNext(level) } });
+    if (level > oldLevel && !get().hasMemory('first-level-up')) {
+      get().addMemory('first-level-up', `Level ${level}!`, `${creature.name} grew up a little for the first time ✨`, 'excited');
+    }
     // Award diamonds at every milestone level (every MILESTONE_LEVEL_INTERVAL levels)
     if (level !== oldLevel) {
       for (let lvl = oldLevel + 1; lvl <= level; lvl++) {
@@ -453,24 +602,28 @@ export const useGameStore = create<GameState>()((set, get) => ({
   equipSkin: (skinId) => {
     const { creature } = get();
     set({ creature: { ...creature, equippedSkinId: skinId } });
+    if (skinId !== 'skin-default') recordFirstOutfit(skinId);
     get().save();
   },
 
   equipAccessory: (accId) => {
     const { creature } = get();
     set({ creature: { ...creature, equippedAccessoryId: accId } });
+    if (accId) recordFirstOutfit(accId);
     get().save();
   },
 
   equipTattoo: (tattooId) => {
     const { creature } = get();
     set({ creature: { ...creature, equippedTattooId: tattooId } });
+    if (tattooId) recordFirstOutfit(tattooId);
     get().save();
   },
 
   equipSpecial: (specialId) => {
     const { creature } = get();
     set({ creature: { ...creature, equippedSpecialId: specialId } });
+    if (specialId) recordFirstOutfit(specialId);
     get().save();
   },
 
@@ -508,11 +661,15 @@ export const useGameStore = create<GameState>()((set, get) => ({
       profile: { ...profile, coins: profile.coins + Math.max(0, coinsEarned), highScores, ownedCosmeticIds, unlockedAchievements },
       creature: {
         ...creature,
-        happiness: Math.min(100, creature.happiness + 20),
+        happiness: Math.min(100, creature.happiness + 20 + (traitLovesGame(creature.trait, gameId) ? TRAIT_GAME_HAPPINESS : 0)),
         energy:    Math.max(0, creature.energy - 10),
         lastPlayed: new Date().toISOString(),
       },
     });
+    if (isNewHighScore && score > 0 && !get().hasMemory('first-high-score')) {
+      const gameName = MINI_GAMES.find(g => g.id === gameId)?.name ?? 'a game';
+      get().addMemory('first-high-score', 'First high score!', `${score.toLocaleString()} points in ${gameName} 🏆`, 'excited');
+    }
     get().gainXP(xpEarned);
     get().save();
   },
@@ -590,4 +747,5 @@ export const useGameStore = create<GameState>()((set, get) => ({
     await get().save();
     return { isNew: true, streak, coinsEarned, diamondsEarned, streakBonus };
   },
-}));
+};
+});

@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect } from 'react';
 import { View, Text, StyleSheet, Dimensions, ImageBackground, TouchableOpacity, Image, Alert } from 'react-native';
-import { Audio } from 'expo-av';
+import { useAudioPlayer } from 'expo-audio';
 import { FONT } from '../../lib/theme';
 import { playSfx } from '../../lib/sfx';
 import PauseOverlay from '../../components/PauseOverlay';
@@ -188,20 +188,7 @@ export default function BubblePop({ level, onFinish }: Props) {
   const isPausedRef = useRef(false);
   const saveMeRef       = useRef(false);   // "danger/time's up, save me?" overlay showing
   const continueUsedRef = useRef(false);   // only one continue allowed per game
-  const popSoundRef = useRef<Audio.Sound | null>(null);
-
-  useEffect(() => {
-    let cancelled = false;
-    Audio.Sound.createAsync(require('../../../assets/audio/ballpop.wav')).then(({ sound }) => {
-      if (cancelled) { sound.unloadAsync(); return; }
-      popSoundRef.current = sound;
-    });
-    return () => {
-      cancelled = true;
-      popSoundRef.current?.unloadAsync();
-      popSoundRef.current = null;
-    };
-  }, []);
+  const popSound = useAudioPlayer(require('../../../assets/audio/ballpop.wav'));
 
   useEffect(() => {
     if (!running || isPaused || showSaveMe) return;
@@ -337,7 +324,7 @@ export default function BubblePop({ level, onFinish }: Props) {
       const cluster = findCluster(g, r, c);
 
       if (cluster.length >= 3) {
-        playSfx(popSoundRef.current);
+        playSfx(popSound);
         // Find orphans with cluster pre-removed
         const tmpG = g.map(row => [...row]);
         for (const [cr, cc] of cluster) tmpG[cr][cc] = null;

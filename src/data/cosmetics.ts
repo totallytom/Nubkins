@@ -43,6 +43,12 @@ export const COSMETICS: Cosmetic[] = [
   { id: 'tat-earthball', name: 'Earth Ball', type: 'special', rarity: 'legendary', priceCoin: 0, priceDiamond: 0, emoji: '', image: require('../../assets/custom-items/EarthBall.png'), imageStyle: { width: 68, height: 68, top: 48, left: 4 }, description: "A relic from another world. Only the most devoted bathers have ever unlocked this.", achievementScores: [{ gameId: 'bath-time', score: 750000 }] },
   { id: 'acc-halo',      name: 'Angel Halo',      type: 'accessory', rarity: 'epic',      priceCoin: 0,   priceDiamond: ITEM_PRICE_DIAMONDS,  emoji: '', image: require('../../assets/custom-items/nubkins_halo.png'), imageStyle: { width: 110, height: 90, top: -18, left: 15 }, description: "Don't be fooled.", unlockLevel: 4 },
 
+  // Anniversary rewards — never sold; granted on days-together milestones.
+  // Emoji placeholders until dedicated art is added (swap `emoji` for `image` + `imageStyle`).
+  { id: 'acc-anniv-week',  name: 'Friendship Ribbon',  type: 'accessory', rarity: 'rare',      priceCoin: 0, priceDiamond: 0, emoji: '🎀', anniversaryDay: 7,   description: 'Given on your first week together. Tied with love.' },
+  { id: 'acc-anniv-month', name: 'Moonth Blossom',     type: 'accessory', rarity: 'epic',      priceCoin: 0, priceDiamond: 0, emoji: '🌸', anniversaryDay: 30,  description: 'A whole month of friendship, in full bloom.' },
+  { id: 'acc-anniv-100',   name: 'Hundred-Day Crown',  type: 'accessory', rarity: 'legendary', priceCoin: 0, priceDiamond: 0, emoji: '👑', anniversaryDay: 100, description: '100 days together. Royalty of the heart.' },
+
   // Backgrounds / Themes
   { id: 'midnight-rose', name: 'Midnight Rose', type: 'background', rarity: 'epic', priceCoin: 0, priceDiamond: ITEM_PRICE_DIAMONDS, description: 'Deep crimson darkness. For those who bloom at night.' },
    { id: 'angel-sky', name: 'Angel Sky', type: 'background', rarity: 'epic', priceCoin: 0, priceDiamond: ITEM_PRICE_DIAMONDS, description: 'Deep crimson darkness. For those who bloom at night.' },

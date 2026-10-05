@@ -5,6 +5,7 @@ import {
   Dimensions,
   Image,
   ImageBackground,
+  PanResponder,
   StyleSheet,
   Text,
   TouchableOpacity,
@@ -21,24 +22,27 @@ import { GAME_CONTINUE_DIAMONDS } from '../../data/economy';
 const { width: SW } = Dimensions.get('window');
 
 // ── Board geometry ──────────────────────────────────────────────────────────
-// A 9x9 grid where only a plus/cross shape of cells is valid:
-//   - the middle band of 3 columns (3,4,5) spans all 9 rows (top arm + hub + bottom arm)
-//   - the middle band of 3 rows    (3,4,5) spans all 9 columns (left arm + hub + right arm)
-// The 3x3 overlap of those two bands (rows 3-5, cols 3-5) is the rotating hub.
-const SIZE    = 9;
-const HUB_LO  = 3;
-const HUB_HI  = 5;
-const MATCH_MIN = 4; // this mode requires 4+ in a row/column, not 3
+// Same plus/cross board as Twist Catch: a 9x9 grid where only the middle band
+// of 3 columns (3-5) and the middle band of 3 rows (3-5) are valid cells.
+// Every valid cell sits on exactly one row line and one column line; lines
+// through the hub span all 9 cells, lines through an arm span only 3.
+const SIZE      = 9;
+const HUB_LO    = 3;
+const HUB_HI    = 5;
+const MATCH_MIN = 3;
 
 const GAP       = 2;
 const H_PAD     = 4;
 const CELL_SIZE = Math.floor((SW - H_PAD * 2 - (SIZE - 1) * GAP) / SIZE);
 const IMG_SIZE  = CELL_SIZE - 6;
 const STEP      = CELL_SIZE + GAP;
-const HUB_BOX   = 3 * CELL_SIZE + 2 * GAP;
 const GAME_TIME = 60;
 const CONTINUE_TIME = 20;
-const ROTATE_MS = 220;
+const DRAG_SLOP = 10;   // px before a drag locks to an axis
+const SNAP_MS   = 120;
+
+type Axis = 'row' | 'col';
+type Line = { axis: Axis; idx: number };
 
 type TileConfig = { image: any; border: string; bg: string };
 const TILE_CONFIGS: TileConfig[] = [
@@ -70,15 +74,21 @@ function colorsForLevel(lvl: number) {
 
 function randTile(nc: number) { return Math.floor(Math.random() * nc); }
 
-// A cell is part of the cross iff it's in the vertical band (hub columns,
-// spanning all rows) or the horizontal band (hub rows, spanning all columns).
 function isValid(r: number, c: number) {
   return (c >= HUB_LO && c <= HUB_HI) || (r >= HUB_LO && r <= HUB_HI);
 }
 
-// For gravity/refill: the valid row-range within a given column.
-function colRange(c: number): [number, number] {
-  return (c >= HUB_LO && c <= HUB_HI) ? [0, SIZE - 1] : [HUB_LO, HUB_HI];
+// The valid index-range along a line. Symmetric for rows and columns: a line
+// through the hub band spans the whole board, any other line only the band.
+function bandRange(i: number): [number, number] {
+  return (i >= HUB_LO && i <= HUB_HI) ? [0, SIZE - 1] : [HUB_LO, HUB_HI];
+}
+
+function lineCells({ axis, idx }: Line): [number, number][] {
+  const [lo, hi] = bandRange(idx);
+  const out: [number, number][] = [];
+  for (let i = lo; i <= hi; i++) out.push(axis === 'row' ? [idx, i] : [i, idx]);
+  return out;
 }
 
 function makeBoard(nc: number): number[][] {
@@ -99,9 +109,8 @@ function makeBoard(nc: number): number[][] {
   return b;
 }
 
-// Runs of MATCH_MIN+ identical tiles, scanned per-row and per-column.
-// Invalid cells hold -1, which never equals a tile value, so they naturally
-// break runs at the boundary of the cross shape without special-casing.
+// Runs of MATCH_MIN+ identical tiles. Invalid cells hold -1, which breaks runs
+// at the edge of the cross without special-casing.
 function findMatches(board: number[][]): Set<string> {
   const out = new Set<string>();
   for (let r = 0; r < SIZE; r++) {
@@ -129,9 +138,6 @@ function findMatches(board: number[][]): Set<string> {
   return out;
 }
 
-// Gravity + refill, scoped per-column to that column's valid row-range —
-// this is what lets the two arm-only columns and the tall hub column all
-// "fall" correctly without leaking into cells outside the cross.
 function clearAndRefill(board: number[][], cleared: Set<string>, nc: number): number[][] {
   const b = board.map(row => [...row]);
   for (const k of cleared) {
@@ -139,7 +145,7 @@ function clearAndRefill(board: number[][], cleared: Set<string>, nc: number): nu
     b[r][c] = -1;
   }
   for (let c = 0; c < SIZE; c++) {
-    const [lo, hi] = colRange(c);
+    const [lo, hi] = bandRange(c);
     const kept: number[] = [];
     for (let r = lo; r <= hi; r++) if (b[r][c] >= 0) kept.push(b[r][c]);
     const missing = (hi - lo + 1) - kept.length;
@@ -149,36 +155,29 @@ function clearAndRefill(board: number[][], cleared: Set<string>, nc: number): nu
   return b;
 }
 
-// The core mechanic: rotate the 3x3 hub sub-grid in place. Nothing outside
-// the hub moves — but because the hub's own border cells are what touch each
-// arm, this single rotation changes what's adjacent to all four arms at once.
-function rotateHub(board: number[][], dir: 1 | -1): number[][] {
+// The core mechanic: cyclically shift one line by k cells (positive = right
+// for rows, down for columns). Tiles pushed off one end wrap to the other.
+function shiftLine(board: number[][], line: Line, k: number): number[][] {
   const b = board.map(row => [...row]);
-  const sub: number[][] = [];
-  for (let r = 0; r < 3; r++) {
-    sub.push([b[HUB_LO + r][HUB_LO], b[HUB_LO + r][HUB_LO + 1], b[HUB_LO + r][HUB_LO + 2]]);
-  }
-  const rotated: number[][] = [[0, 0, 0], [0, 0, 0], [0, 0, 0]];
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) {
-      rotated[r][c] = dir === 1 ? sub[2 - c][r] : sub[c][2 - r];
-    }
-  }
-  for (let r = 0; r < 3; r++) {
-    for (let c = 0; c < 3; c++) {
-      b[HUB_LO + r][HUB_LO + c] = rotated[r][c];
-    }
+  const cells = lineCells(line);
+  const n = cells.length;
+  const vals = cells.map(([r, c]) => board[r][c]);
+  for (let i = 0; i < n; i++) {
+    const [r, c] = cells[(((i + k) % n) + n) % n];
+    b[r][c] = vals[i];
   }
   return b;
 }
 
-// There are only 3 distinct non-identity hub states (90/180/270). If none of
-// them produce a match, the board is stuck and needs a reshuffle.
 function hasMove(board: number[][]): boolean {
-  let b = board;
-  for (let i = 0; i < 3; i++) {
-    b = rotateHub(b, 1);
-    if (findMatches(b).size > 0) return true;
+  for (const axis of ['row', 'col'] as Axis[]) {
+    for (let idx = 0; idx < SIZE; idx++) {
+      const line = { axis, idx };
+      const n = lineCells(line).length;
+      for (let k = 1; k < n; k++) {
+        if (findMatches(shiftLine(board, line, k)).size > 0) return true;
+      }
+    }
   }
   return false;
 }
@@ -192,7 +191,7 @@ function makeSolvableBoard(nc: number): number[][] {
 
 // ── Component ────────────────────────────────────────────────────────────
 
-export default function TwistCatch({ level, onFinish }: Props) {
+export default function SlideCatch({ level, onFinish }: Props) {
   const nc          = colorsForLevel(level);
   const activeTiles = TILE_CONFIGS.slice(0, nc);
 
@@ -208,17 +207,24 @@ export default function TwistCatch({ level, onFinish }: Props) {
   const [isPaused,   setIsPaused]   = useState(false);
   const [showSaveMe, setShowSaveMe] = useState(false);
   const [combo,      setCombo]      = useState(0);
+  const [dragLine,   setDragLine]   = useState<Line | null>(null);
 
   const boardRef    = useRef<number[][]>(board);
   const scoreRef    = useRef(0);
   const doneRef     = useRef(false);
-  const busyRef     = useRef(false);   // cascade running
+  const busyRef     = useRef(false);   // cascade or snap animation running
   const runRef      = useRef(false);
   const isPausedRef = useRef(false);
   const saveMeRef       = useRef(false);
   const continueUsedRef = useRef(false);
-  const rotateBusyRef   = useRef(false);   // spin animation running
   const timerRef    = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  // Drag gesture bookkeeping: the cell the finger went down on, and the line
+  // it locked onto once movement passed DRAG_SLOP.
+  const dragStartRef = useRef<{ r: number; c: number } | null>(null);
+  const dragLineRef  = useRef<Line | null>(null);
+  const dragOffset   = useRef(new Animated.Value(0)).current;
+  const dragOffsetRef = useRef(0);
 
   const clearAnim    = useRef(new Animated.Value(0)).current;
   const clearScale   = useRef(clearAnim.interpolate({ inputRange: [0, 0.3, 1], outputRange: [1, 1.25, 0], extrapolate: 'clamp' })).current;
@@ -226,9 +232,6 @@ export default function TwistCatch({ level, onFinish }: Props) {
 
   const comboScale = useRef(new Animated.Value(1)).current;
   const scoreScale = useRef(new Animated.Value(1)).current;
-
-  const hubSpin = useRef(new Animated.Value(0)).current;
-  const hubRotateStr = hubSpin.interpolate({ inputRange: [-90, 0, 90], outputRange: ['-90deg', '0deg', '90deg'] });
 
   const particleIdRef = useRef(0);
   const [particles, setParticles] = useState<ParticleData[]>([]);
@@ -380,24 +383,90 @@ export default function TwistCatch({ level, onFinish }: Props) {
     }, 320);
   }
 
-  function commitRotate(dir: 1 | -1) {
-    const next = rotateHub(boardRef.current, dir);
-    busyRef.current  = true;
-    boardRef.current = next;
-    setBoard(next);
-    cascade(next, 1);
+  // ── Drag handling ──────────────────────────────────────────────────────
+
+  function canInteract() {
+    return runRef.current && !busyRef.current && !doneRef.current && !isPausedRef.current && !saveMeRef.current;
   }
 
-  function handleHubPress() {
-    if (!runRef.current || busyRef.current || doneRef.current || rotateBusyRef.current || isPausedRef.current || saveMeRef.current) return;
-    rotateBusyRef.current = true;
-    hubSpin.setValue(0);
-    Animated.timing(hubSpin, { toValue: 90, duration: ROTATE_MS, useNativeDriver: true }).start(() => {
-      hubSpin.setValue(0);
-      rotateBusyRef.current = false;
-      commitRotate(1);
+  function endDrag() {
+    dragStartRef.current = null;
+    dragLineRef.current  = null;
+    dragOffsetRef.current = 0;
+    dragOffset.setValue(0);
+    setDragLine(null);
+  }
+
+  function onDragStart(x: number, y: number) {
+    if (!canInteract()) return;
+    const c = Math.floor((x - H_PAD) / STEP);
+    const r = Math.floor(y / STEP);
+    if (r < 0 || r >= SIZE || c < 0 || c >= SIZE || !isValid(r, c)) return;
+    dragStartRef.current = { r, c };
+  }
+
+  function onDragMove(dx: number, dy: number) {
+    const start = dragStartRef.current;
+    if (!start) return;
+    if (!dragLineRef.current) {
+      if (Math.max(Math.abs(dx), Math.abs(dy)) < DRAG_SLOP) return;
+      const line: Line = Math.abs(dx) > Math.abs(dy)
+        ? { axis: 'row', idx: start.r }
+        : { axis: 'col', idx: start.c };
+      dragLineRef.current = line;
+      setDragLine(line);
+    }
+    const off = dragLineRef.current.axis === 'row' ? dx : dy;
+    dragOffsetRef.current = off;
+    dragOffset.setValue(off);
+  }
+
+  function onDragEnd() {
+    const line = dragLineRef.current;
+    if (!line) { dragStartRef.current = null; return; }
+
+    const n = lineCells(line).length;
+    const k = Math.round(dragOffsetRef.current / STEP);
+    const kMod = ((k % n) + n) % n;
+    const next = kMod === 0 || !canInteract() ? null : shiftLine(boardRef.current, line, kMod);
+    const valid = next !== null;
+
+    // Every slide sticks, match or not — snap to the nearest cell and commit.
+    // Only a drag that lands back on its start (or happens while the game is
+    // paused/over) slides back.
+    busyRef.current = true;
+    dragStartRef.current = null;
+    Animated.timing(dragOffset, {
+      toValue: valid ? k * STEP : 0,
+      duration: SNAP_MS,
+      useNativeDriver: false,
+    }).start(() => {
+      if (valid && next && !doneRef.current) {
+        boardRef.current = next;
+        setBoard(next);
+        endDrag();
+        cascade(next, 1);
+      } else {
+        endDrag();
+        busyRef.current = false;
+      }
     });
   }
+
+  // PanResponder is created once, so it calls through a ref to always reach
+  // this render's handlers.
+  const dragHandlers = useRef({ onDragStart, onDragMove, onDragEnd });
+  dragHandlers.current = { onDragStart, onDragMove, onDragEnd };
+
+  const panResponder = useRef(PanResponder.create({
+    onStartShouldSetPanResponder: () => true,
+    onMoveShouldSetPanResponder:  () => true,
+    onPanResponderTerminationRequest: () => false,
+    onPanResponderGrant:     e => dragHandlers.current.onDragStart(e.nativeEvent.locationX, e.nativeEvent.locationY),
+    onPanResponderMove:      (_, g) => dragHandlers.current.onDragMove(g.dx, g.dy),
+    onPanResponderRelease:   () => dragHandlers.current.onDragEnd(),
+    onPanResponderTerminate: () => dragHandlers.current.onDragEnd(),
+  })).current;
 
   // ── Start ──────────────────────────────────────────────────────────────
 
@@ -408,10 +477,9 @@ export default function TwistCatch({ level, onFinish }: Props) {
     doneRef.current  = false;
     busyRef.current  = false;
     runRef.current   = true;
-    rotateBusyRef.current = false;
     saveMeRef.current = false;
     continueUsedRef.current = false;
-    hubSpin.setValue(0);
+    endDrag();
     setBoard(b);
     setScore(0);
     setTimeLeft(GAME_TIME);
@@ -445,6 +513,7 @@ export default function TwistCatch({ level, onFinish }: Props) {
     return (
       <Animated.View
         key={key}
+        pointerEvents="none"
         style={[
           styles.cell,
           style,
@@ -457,19 +526,51 @@ export default function TwistCatch({ level, onFinish }: Props) {
     );
   }
 
-  const armCells: { r: number; c: number; tile: number }[] = [];
+  // The line being dragged is drawn inside a clipping strip. Each tile slides
+  // by the drag offset modulo the line length, with a twin one line-length
+  // behind it, so tiles leaving one end reappear at the other.
+  function renderDragLine(line: Line) {
+    const cells = lineCells(line);
+    const n = cells.length;
+    const L = n * STEP;
+    const [r0, c0] = cells[0];
+    const isRow = line.axis === 'row';
+    return (
+      <View
+        pointerEvents="none"
+        style={[
+          styles.dragStrip,
+          {
+            left:   H_PAD + c0 * STEP,
+            top:    r0 * STEP,
+            width:  isRow ? L - GAP : CELL_SIZE,
+            height: isRow ? CELL_SIZE : L - GAP,
+          },
+        ]}
+      >
+        {cells.map(([r, c], i) => {
+          const pos  = Animated.modulo(Animated.add(dragOffset, i * STEP), L);
+          const twin = Animated.add(pos, -L);
+          const key  = `${r},${c}`;
+          const t = (v: Animated.AnimatedModulo<number> | Animated.AnimatedAddition<number>) =>
+            ({ position: 'absolute', left: 0, top: 0, transform: [isRow ? { translateX: v } : { translateY: v }] });
+          return (
+            <React.Fragment key={key}>
+              {renderTile(board[r][c], key, t(pos))}
+              {renderTile(board[r][c], `${key}-twin`, t(twin))}
+            </React.Fragment>
+          );
+        })}
+      </View>
+    );
+  }
+
+  const dragKeys = new Set(dragLine ? lineCells(dragLine).map(([r, c]) => `${r},${c}`) : []);
+  const staticCells: { r: number; c: number; tile: number }[] = [];
   for (let r = 0; r < SIZE; r++) {
     for (let c = 0; c < SIZE; c++) {
-      if (!isValid(r, c)) continue;
-      const inHub = r >= HUB_LO && r <= HUB_HI && c >= HUB_LO && c <= HUB_HI;
-      if (inHub) continue;
-      armCells.push({ r, c, tile: board[r][c] });
-    }
-  }
-  const hubCells: { r: number; c: number; tile: number }[] = [];
-  for (let r = HUB_LO; r <= HUB_HI; r++) {
-    for (let c = HUB_LO; c <= HUB_HI; c++) {
-      hubCells.push({ r, c, tile: board[r][c] });
+      if (!isValid(r, c) || dragKeys.has(`${r},${c}`)) continue;
+      staticCells.push({ r, c, tile: board[r][c] });
     }
   }
 
@@ -485,7 +586,7 @@ export default function TwistCatch({ level, onFinish }: Props) {
         <View style={styles.gameBox}>
           <View style={styles.hud}>
             <View style={styles.scoreWrap}>
-              <Image source={require('../../../assets/dooyoo/Dooyoo-happy.png')} style={styles.scoreIcon} resizeMode="contain" />
+              <Image source={require('../../../assets/louie/louie-happy.png')} style={styles.scoreIcon} resizeMode="contain" />
               <Animated.Text style={[styles.scoreTxt, { transform: [{ scale: scoreScale }] }]}>
                 {score}
               </Animated.Text>
@@ -506,26 +607,12 @@ export default function TwistCatch({ level, onFinish }: Props) {
             </TouchableOpacity>
           </View>
 
-          <View style={styles.grid}>
-            {armCells.map(({ r, c, tile }) =>
+          <View style={styles.grid} {...panResponder.panHandlers}>
+            {staticCells.map(({ r, c, tile }) =>
               renderTile(tile, `${r},${c}`, { position: 'absolute', left: H_PAD + c * STEP, top: r * STEP })
             )}
 
-            <TouchableOpacity
-              activeOpacity={0.85}
-              onPress={handleHubPress}
-              style={[styles.hubBox, { left: H_PAD + HUB_LO * STEP, top: HUB_LO * STEP }]}
-            >
-              <Animated.View style={[styles.hubSpinner, { transform: [{ rotate: hubRotateStr }] }]}>
-                {hubCells.map(({ r, c, tile }) =>
-                  renderTile(tile, `${r},${c}`, {
-                    position: 'absolute',
-                    left: (c - HUB_LO) * STEP,
-                    top:  (r - HUB_LO) * STEP,
-                  })
-                )}
-              </Animated.View>
-            </TouchableOpacity>
+            {dragLine && renderDragLine(dragLine)}
 
             {particles.map(p => (
               <Animated.View
@@ -569,11 +656,11 @@ export default function TwistCatch({ level, onFinish }: Props) {
         </View>
       ) : (
         <View style={styles.overlay}>
-          <Text style={styles.ovTitle}>Twist Catch</Text>
+          <Text style={styles.ovTitle}>Slide Catch</Text>
           <Text style={styles.ovDesc}>
-            Tap the center hub to spin it 90°.{'\n'}
-            Rotating shifts tiles at the junction of all four arms —{'\n'}
-            match 4 or more in a row or column to catch them!{'\n'}
+            Drag any row or column to slide it.{'\n'}
+            Nubkins pushed off one end wrap around to the other —{'\n'}
+            line up 3 or more to pop them!{'\n'}
             {level > 1
               ? `Lv${level}: ${nc} nubkin types — harder to match!`
               : `${nc} nubkin types · ${GAME_TIME} seconds`
@@ -629,14 +716,11 @@ const styles = StyleSheet.create({
   },
   tileImg: { width: IMG_SIZE, height: IMG_SIZE },
 
-  hubBox: {
+  dragStrip: {
     position: 'absolute',
-    width: HUB_BOX,
-    height: HUB_BOX,
-  },
-  hubSpinner: {
-    width: HUB_BOX,
-    height: HUB_BOX,
+    overflow: 'hidden',
+    borderRadius: 8,
+    backgroundColor: 'rgba(255,255,255,0.45)',
   },
 
   overlay: {
@@ -674,7 +758,7 @@ const styles = StyleSheet.create({
   ovTitle: { fontFamily: FONT, color: '#1A1A35', fontSize: 32, fontWeight: '900' },
   ovDesc:  { fontFamily: FONT, color: '#2D2D4E', fontSize: 15, textAlign: 'center', lineHeight: 24, backgroundColor: 'rgba(255,255,255,0.55)', borderRadius: 14, padding: 14 },
   startBtn: {
-    backgroundColor: '#9B59B6',
+    backgroundColor: '#E67E22',
     paddingHorizontal: 48,
     paddingVertical: 16,
     borderRadius: 24,

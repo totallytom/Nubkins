@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { useNavigation } from '@react-navigation/native';
+import { useIsFocused, useNavigation } from '@react-navigation/native';
 import {
   Animated,
   Image,
@@ -13,13 +13,19 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { useBottomTabBarHeight } from '@react-navigation/bottom-tabs';
 import { useGameStore, SLEEP_WAKE_COST, SLEEP_WAKE_ENERGY } from '../store/useGameStore';
 import { CreatureMood } from '../types';
-import NubkinCreature, { type NubkinCreatureRef } from '../components/NubkinCreature';
+import NubkinCreature, { type NubkinCreatureRef, type PetKind } from '../components/NubkinCreature';
+import NamePetModal from '../components/NamePetModal';
+import AnniversaryModal from '../components/AnniversaryModal';
+import { Anniversary, dayNumber, pendingAnniversaries } from '../lib/together';
+import { Cosmetic } from '../types';
+import { getTrait, TraitId } from '../data/personality';
 import CoinDisplay from '../components/CoinDisplay';
 import { FOOD_ITEMS } from '../data/food';
 import { getCosmeticById } from '../data/cosmetics';
-import { FONT, FONT_MARU } from '../lib/theme';
+import { FONT, FONT_MARU, KAWAII } from '../lib/theme';
 import { getThemeById, CapsuleTheme } from '../data/themes';
 import DailyStreakModal from '../components/DailyStreakModal';
 import TooltipCard from '../components/TooltipCard';
@@ -65,8 +71,12 @@ const MOOD_PHRASES: Record<string, string> = {
   sleeping: 'Zzz...',
 };
 
-function MoodBadge({ mood }: { mood: string }) {
-  const phrase = MOOD_PHRASES[mood] ?? MOOD_PHRASES.neutral;
+function MoodBadge({ mood, trait }: { mood: CreatureMood; trait?: TraitId }) {
+  const lines = getTrait(trait)?.moodLines[mood];
+  const phrase = React.useMemo(
+    () => lines?.length ? lines[Math.floor(Math.random() * lines.length)] : (MOOD_PHRASES[mood] ?? MOOD_PHRASES.neutral),
+    [mood, trait],
+  );
   return (
     <View style={styles.speechWrap}>
       <View style={styles.speechBubble}>
@@ -127,7 +137,26 @@ function CapsuleButton({
 
 const COIN_N = 10;
 
+// Minimum gap between petting stat rewards (hearts still play on every pet).
+const PET_REWARD_COOLDOWN_MS = 1000;
+
+const SHY_STROKE_LINES: ((name: string) => string)[] = [
+  n => `${n} blushes and leans in… 🙈`,
+  n => `${n} makes a tiny happy squeak~`,
+  n => `${n} is slowly warming up to you 💕`,
+];
+
+const STROKE_LINES: ((name: string) => string)[] = [
+  n => `${n} leans into your hand 🫶`,
+  n => `${n} is purring~ 💕`,
+  n => `${n} wiggles happily!`,
+  n => `${n} loves head pats 💖`,
+  n => `${n} melts into a happy blob~`,
+];
+
 export default function HomeScreen() {
+  // The circle tab bar floats over the screen; keep content clear of it.
+  const tabBarHeight = useBottomTabBarHeight();
   const navigation = useNavigation<any>();
   const creature         = useGameStore(s => s.creature);
   const profile           = useGameStore(s => s.profile);
@@ -146,8 +175,16 @@ export default function HomeScreen() {
   } | null>(null);
   const [streakVisible, setStreakVisible]   = useState(false);
   const toastAnim    = useRef(new Animated.Value(0)).current;
-  const [petCount, setPetCount] = useState(0);
   const creatureRef  = useRef<NubkinCreatureRef>(null);
+  const lastPetRewardRef = useRef(0);
+  const moodTimerRef     = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [namingOpen, setNamingOpen] = useState(!creature.named);
+  const streakPendingNameRef = useRef(false);
+  const [checkInDone, setCheckInDone] = useState(false);
+  const [party, setParty] = useState<{ anniversary: Anniversary; reward: Cosmetic | null } | null>(null);
+  const memories = useGameStore(s => s.memories);
+  // Parties only open while Home is focused so they never stack on a game's modal.
+  const isFocused = useIsFocused();
   const coinShowerPendingRef = useRef(false);
   const [showerActive, setShowerActive] = useState(false);
   const lockAnim    = useRef(new Animated.Value(0)).current;
@@ -209,11 +246,39 @@ export default function HomeScreen() {
         streakBonus:    result.streakBonus,
       });
       if (result.isNew) {
-        setStreakVisible(true);
         coinShowerPendingRef.current = true;
+        // Two RN Modals can't be up at once on iOS — if the naming prompt is
+        // showing, open the daily reward right after the player picks a name.
+        if (useGameStore.getState().creature.named) setStreakVisible(true);
+        else streakPendingNameRef.current = true;
       }
+      setCheckInDone(true);
     })();
   }, []);
+
+  // Anniversary parties queue behind the naming prompt and daily reward so
+  // only one modal is ever up; each party claims its reward as it opens.
+  useEffect(() => {
+    if (!checkInDone || !isFocused || namingOpen || streakVisible || party || feedModalOpen || streakPendingNameRef.current) return;
+    const { creature: c, claimAnniversary } = useGameStore.getState();
+    const next = pendingAnniversaries(c.createdAt, c.celebratedAnniversaries)[0];
+    if (!next) return;
+    const t = setTimeout(() => {
+      const reward = claimAnniversary(next);
+      setParty({ anniversary: next, reward });
+    }, 450);
+    return () => clearTimeout(t);
+  }, [checkInDone, isFocused, namingOpen, streakVisible, party, feedModalOpen]);
+
+  // "📸 Memory saved" whenever a new snapshot lands in the memory book.
+  const memoryCountRef = useRef(memories.length);
+  useEffect(() => {
+    if (memories.length > memoryCountRef.current) {
+      const latest = memories[memories.length - 1];
+      if (latest.kind !== 'anniversary') showToast(`📸 Memory saved: ${latest.title}`);
+    }
+    memoryCountRef.current = memories.length;
+  }, [memories.length]);
 
   useEffect(() => {
     if (!streakVisible && coinShowerPendingRef.current) {
@@ -241,14 +306,26 @@ export default function HomeScreen() {
 
   function flashMood(m: CreatureMood, ms = 1500) {
     setOverrideMood(m);
-    setTimeout(() => setOverrideMood(null), ms);
+    if (moodTimerRef.current) clearTimeout(moodTimerRef.current);
+    moodTimerRef.current = setTimeout(() => setOverrideMood(null), ms);
   }
 
-  function handleTap() {
-    petCreature();
-    flashMood('happy');
-    setPetCount(c => c + 1);
-    if ((petCount + 1) % 5 === 0) showToast(`${creature.name} loves you!`);
+  // Taps and strokes both land here. Hearts/wiggles play on every pet, but the
+  // stat reward (+happiness, −energy, +XP) is rate-limited so rapid taps or a
+  // long stroke can't drain energy or farm XP.
+  function handlePet(kind: PetKind, combo: number) {
+    const now = Date.now();
+    if (now - lastPetRewardRef.current >= PET_REWARD_COOLDOWN_MS) {
+      lastPetRewardRef.current = now;
+      petCreature();
+    }
+    flashMood(kind === 'stroke' || combo >= 3 ? 'excited' : 'happy');
+    if (kind === 'stroke') {
+      const lines = creature.trait === 'shy' ? SHY_STROKE_LINES : STROKE_LINES;
+      showToast(lines[Math.floor(Math.random() * lines.length)](creature.name));
+    } else if (combo > 0 && combo % 5 === 0) {
+      showToast(`${creature.name} loves you! 💕`);
+    }
   }
 
   const isSleeping   = mood === 'sleeping';
@@ -290,19 +367,33 @@ export default function HomeScreen() {
   function handleFeed(foodId: string) {
     const food = FOOD_ITEMS.find(f => f.id === foodId);
     if (!food) return;
-    const ok = feedCreature(food.hungerRestore, food.happinessBonus, food.coinCost, food.energyRestore);
-    if (ok) {
-      flashMood('excited');
-      showToast(`${creature.name} ate ${food.name}!`);
-      setFeedModalOpen(false);
-      creatureRef.current?.feedJump();
-    } else {
+    const result = feedCreature(food.hungerRestore, food.happinessBonus, food.coinCost, food.energyRestore, food.id);
+    if (!result.ok) {
       showToast(`Not enough coins!`);
+      return;
+    }
+    setFeedModalOpen(false);
+    const name = creature.name;
+    if (result.reaction === 'love') {
+      flashMood('excited', 2200);
+      creatureRef.current?.feedJump();
+      showToast(result.revealed === 'favorite'
+        ? `💖 ${name}'s favorite food is ${food.name}!`
+        : `${name}'s eyes sparkle… they REALLY like that! ✨`);
+    } else if (result.reaction === 'dislike') {
+      flashMood('sad', 2200);
+      showToast(result.revealed === 'dislike'
+        ? `😖 ${name} doesn't like ${food.name}…`
+        : `${name} makes a funny face… 😖`);
+    } else {
+      flashMood('excited');
+      creatureRef.current?.feedJump();
+      showToast(creature.trait === 'greedy' ? `${name} gobbles it up! 😋` : `${name} ate ${food.name}!`);
     }
   }
 
   return (
-    <SafeAreaView style={[styles.safe, { backgroundColor: theme.pageBg }]} edges={['top']}>
+    <SafeAreaView style={[styles.safe, { backgroundColor: theme.pageBg, paddingBottom: tabBarHeight }]} edges={['top']}>
       <View style={styles.container}>
 
         <View style={styles.header}>
@@ -352,7 +443,16 @@ export default function HomeScreen() {
                   borderColor: theme.statsPanelBorder,
                 }]}>
                   <View style={styles.brandRow}>
-                    <Text style={styles.brandTag}>NUBKINS</Text>
+                    <Text style={styles.brandTag} numberOfLines={1}>{creature.name}</Text>
+                    <TouchableOpacity
+                      style={styles.dayChip}
+                      onPress={() => navigation.navigate('MemoryBook')}
+                      activeOpacity={0.75}
+                      hitSlop={{ top: 8, bottom: 8, left: 6, right: 6 }}
+                      accessibilityLabel={`Day ${dayNumber(creature.createdAt)} together. Open memory book`}
+                    >
+                      <Text style={styles.dayChipText}>💞 Day {dayNumber(creature.createdAt)} 📖</Text>
+                    </TouchableOpacity>
                     <Text style={styles.screenLvl}>Lv.{creature.level}</Text>
                   </View>
                   <View style={styles.statGrid}>
@@ -368,7 +468,7 @@ export default function HomeScreen() {
                 </View>
 
                 {/* Mood badge */}
-                <MoodBadge mood={mood} />
+                <MoodBadge mood={mood} trait={creature.trait} />
 
                 {/* Creature zone */}
                 <View style={styles.creatureZone}>
@@ -384,7 +484,10 @@ export default function HomeScreen() {
                       tattooImageStyle={tattooImageStyle}
                       specialImage={specialImage}
                       specialImageStyle={specialImageStyle}
-                      onTap={isSleeping ? handleWakeUp : handleTap}
+                      onTap={handleWakeUp}
+                      pettable={!isSleeping}
+                      onPet={handlePet}
+                      trait={creature.trait}
                     />
                   </View>
                   <View style={[styles.screenFloor, { backgroundColor: theme.screenFloor }]} />
@@ -434,7 +537,7 @@ export default function HomeScreen() {
               {isSleeping ? (
                 <CapsuleButton emoji="⏰" label={`Wake (${SLEEP_WAKE_COST}c)`} onPress={handleWakeUp} large theme={theme} />
               ) : (
-                <CapsuleButton imageSource={require('../../assets/nubkins/Nubkin1-Happy.png')}  label="Pet"      onPress={handleTap} large theme={theme} />
+                <CapsuleButton imageSource={require('../../assets/nubkins/Nubkin1-Happy.png')}  label="Pet"      onPress={() => creatureRef.current?.pet()} large theme={theme} />
               )}
               <CapsuleButton imageSource={require('../../assets/custom-items/nubkin_witchhat5.png')} label="Wardrobe" onPress={() => navigation.navigate('Wardrobe')} theme={theme} disabled={isSleeping} />
             </View>
@@ -480,6 +583,12 @@ export default function HomeScreen() {
                   <View style={styles.foodInfo}>
                     <Text style={styles.foodName}>{food.name}</Text>
                     <Text style={styles.foodStats}>+{food.hungerRestore} hunger  +{food.happinessBonus} happy</Text>
+                    {creature.favoriteRevealed && food.id === creature.favoriteBerryId && (
+                      <Text style={[styles.foodTaste, styles.foodTasteLove]}>💖 {creature.name}'s favorite!</Text>
+                    )}
+                    {creature.dislikeRevealed && food.id === creature.dislikedBerryId && (
+                      <Text style={[styles.foodTaste, styles.foodTasteYuck]}>😖 {creature.name} dislikes this</Text>
+                    )}
                   </View>
                   <View style={styles.foodCost}>
                     <Text style={styles.foodCostText}>{food.coinCost} coins</Text>
@@ -490,6 +599,37 @@ export default function HomeScreen() {
           </Pressable>
         </Pressable>
       </Modal>
+
+      {/* First-launch naming prompt */}
+      <NamePetModal
+        visible={namingOpen}
+        mode="hatch"
+        onDone={() => {
+          setNamingOpen(false);
+          creatureRef.current?.celebrate();
+          const named = useGameStore.getState().creature;
+          const trait = getTrait(named.trait);
+          if (trait) setTimeout(() => showToast(`${named.name} seems… ${trait.label.toLowerCase()}! ${trait.emoji}`), 600);
+          if (streakPendingNameRef.current) {
+            // Let the naming modal finish fading out before the next one opens.
+            // The ref stays set until then so an anniversary party can't jump the queue.
+            setTimeout(() => {
+              streakPendingNameRef.current = false;
+              setStreakVisible(true);
+            }, 400);
+          }
+        }}
+      />
+
+      {/* Anniversary / birthday party */}
+      <AnniversaryModal
+        anniversary={party?.anniversary ?? null}
+        reward={party?.reward ?? null}
+        onClose={() => {
+          setParty(null);
+          creatureRef.current?.celebrate();
+        }}
+      />
 
       {/* Daily Streak Modal */}
       {streakResult && (
@@ -591,10 +731,10 @@ const styles = StyleSheet.create({
     width: 340,
     backgroundColor: '#FACC15',
     borderRadius: 50,
-    paddingHorizontal: 18,
-    paddingTop: 16,
-    paddingBottom: 4,
-    borderWidth: 3,
+    paddingHorizontal: 13,
+    paddingTop: 8,
+    paddingBottom: 3,
+    borderWidth: 2,
     borderTopColor: '#FDE047',
     borderLeftColor: '#EAB308',
     borderRightColor: '#A16207',
@@ -637,12 +777,16 @@ const styles = StyleSheet.create({
     padding: 10,
     marginBottom: 6,
   },
+  // Shows the Nubkin's name. Letter spacing is tighter than the old "NUBKINS"
+  // tag so a 12-character name still fits beside the day chip and level.
   brandTag: {
     fontFamily: FONT_MARU,
     color: '#121212',
-    fontSize:12,
-    letterSpacing: 4,
+    fontSize: 12,
+    letterSpacing: 1.5,
     fontWeight: '700',
+    flexShrink: 1,
+    marginRight: 6,
   },
   brandRow: {
     flexDirection: 'row',
@@ -828,7 +972,7 @@ const styles = StyleSheet.create({
   },
   xpText: {
     fontFamily: FONT,
-    color: '#A78BFA',
+    color: '#050505',
     fontSize: 9,
   },
 
@@ -935,11 +1079,14 @@ const styles = StyleSheet.create({
   // ── MODAL ────────────────────────────────────────
   modalBackdrop: {
     flex: 1,
-    backgroundColor: 'rgba(46, 45, 45, 0.05)',
+    backgroundColor: KAWAII.backdrop,
     justifyContent: 'flex-end',
   },
   modalSheet: {
-    backgroundColor: '#eeeeee',
+    backgroundColor: KAWAII.card,
+    borderWidth: 4,
+    borderBottomWidth: 0,
+    borderColor: KAWAII.cardBorder,
     borderTopLeftRadius: 24,
     borderTopRightRadius: 24,
     padding: 20,
@@ -947,30 +1094,32 @@ const styles = StyleSheet.create({
   },
   modalHandle: {
     width: 40,
-    height: 4,
-    backgroundColor: '#3D3D6B',
-    borderRadius: 2,
+    height: 5,
+    backgroundColor: KAWAII.pink,
+    borderRadius: 3,
     alignSelf: 'center',
     marginBottom: 16,
   },
   modalTitle: {
     fontFamily: FONT,
-    color: '#000000',
+    color: KAWAII.ink,
     fontSize: 20,
     fontWeight: '800',
     marginBottom: 4,
   },
   modalSub: {
     fontFamily: FONT,
-    color: '#7777AA',
+    color: KAWAII.inkSoft,
     fontSize: 13,
     marginBottom: 16,
   },
   foodRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#b8b8f1',
-    borderRadius: 14,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    borderColor: '#FFC2E0',
+    borderRadius: 18,
     padding: 12,
     marginBottom: 8,
     gap: 12,
@@ -978,10 +1127,25 @@ const styles = StyleSheet.create({
   foodEmoji: { fontFamily: FONT, fontSize: 32 },
   foodImg:   { width: 40, height: 40 },
   foodInfo:  { flex: 1 },
-  foodName:  { fontFamily: FONT, color: '#EFEFFF', fontWeight: '700', fontSize: 15 },
-  foodStats: { fontFamily: FONT, color: '#7777AA', fontSize: 12, marginTop: 2 },
-  foodCost:  { backgroundColor: '#14142A', borderRadius: 10, paddingHorizontal: 10, paddingVertical: 5 },
-  foodCostText: { fontFamily: FONT, color: '#F39C12', fontWeight: '700', fontSize: 13 },
+  foodName:  { fontFamily: FONT, color: KAWAII.ink, fontWeight: '700', fontSize: 15 },
+  foodStats: { fontFamily: FONT, color: KAWAII.inkSoft, fontSize: 12, marginTop: 2 },
+  foodCost:  { backgroundColor: KAWAII.yellow, borderWidth: 2, borderColor: KAWAII.ink, borderRadius: 12, paddingHorizontal: 10, paddingVertical: 5 },
+  foodTaste:     { fontFamily: FONT, fontSize: 11, fontWeight: '800', marginTop: 3, alignSelf: 'flex-start', borderRadius: 8, paddingHorizontal: 6, paddingVertical: 1, overflow: 'hidden' },
+  foodTasteLove: { color: KAWAII.ink, backgroundColor: '#FFE3F1' },
+  foodTasteYuck: { color: KAWAII.ink, backgroundColor: '#EDE7F6' },
+  // "Day N" pill in the stats panel row, between the brand tag and the level.
+  dayChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFE3F1',
+    borderWidth: 1.5,
+    borderColor: KAWAII.ink,
+    borderRadius: 10,
+    paddingHorizontal: 7,
+    paddingVertical: 1,
+  },
+  dayChipText: { fontFamily: FONT, color: KAWAII.ink, fontSize: 10, fontWeight: '900' },
+  foodCostText: { fontFamily: FONT, color: KAWAII.ink, fontWeight: '800', fontSize: 13 },
 
   // ── SLEEP LOCK OVERLAY ────────────────────────────
   sleepLock: {
